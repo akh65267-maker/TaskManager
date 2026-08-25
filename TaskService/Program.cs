@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using TaskService;
 using TaskService.Application;
 using TaskService.Application.Tasks;
 using TaskService.Domain;
@@ -18,6 +19,7 @@ builder.Services.AddHealthChecks()
 builder.Services.AddScoped<ITaskRepository, TaskRepository>();
 builder.Services.AddScoped<TasksService>();
 
+builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddProblemDetails();
 
 builder.Services.AddEndpointsApiExplorer();

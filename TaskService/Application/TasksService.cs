@@ -27,9 +27,6 @@ public class TasksService
 
     public async Task<Guid> CreateAsync(CreateTaskRequest request, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.Title))
-            throw new ArgumentException("Title is required.");
-
         var task = new TaskItem(request.Title);
 
         await _repo.AddAsync(task, cancellationToken);
