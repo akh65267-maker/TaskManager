@@ -1,17 +1,18 @@
 services:
-  # tasks-api:
-  #   build:
-  #     context: ../src/Services
-  #     dockerfile: TaskService/Dockerfile
-  #   container_name: taskflow-tasks-api
-  #   environment:
-  #     ASPNETCORE_ENVIRONMENT: Development
-  #     ConnectionStrings__TaskDatabase: Host=postgres;Port=5432;Database=taskflow;Username=postgres;Password=postgres
-  #   ports:
-  #     - "8080:8080"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
+  tasks-api:
+    build:
+      context: ../src/Services
+      dockerfile: TaskService/Dockerfile
+    container_name: taskflow-tasks-api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__TaskDatabase: Host=postgres;Port=5432;Database=taskflow;Username=postgres;Password=postgres
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: postgres:17
