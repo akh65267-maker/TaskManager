@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/deploy/">
+    <File Path="docker-compose.yml" />
+  </Folder>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Services/">
+    <Project Path="TaskService/TaskService.csproj" Id="5164dfad-5dfa-4ae5-ad7a-623f97d2009d" />
+  </Folder>
+  <Folder Name="/tests/" />
+</Solution>
