@@ -12,10 +12,11 @@ EXPOSE 8081
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
-COPY ["TaskService/TaskService.csproj", "TaskService/"]
-RUN dotnet restore "./TaskService/TaskService.csproj"
+COPY ["Services/TaskService/TaskService.csproj", "Services/TaskService/"]
+COPY ["Shared/Contracts/Contracts.csproj", "Shared/Contracts/"]
+RUN dotnet restore "./Services/TaskService/TaskService.csproj"
 COPY . .
-WORKDIR "/src/TaskService"
+WORKDIR "/src/Services/TaskService"
 RUN dotnet build "./TaskService.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 # This stage is used to publish the service project to be copied to the final stage

@@ -1,17 +1,42 @@
 services:
   tasks-api:
     build:
-      context: ../src/Services
-      dockerfile: TaskService/Dockerfile
+      context: ../src
+      dockerfile: Services/TaskService/Dockerfile
     container_name: taskflow-tasks-api
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__TaskDatabase: Host=postgres;Port=5432;Database=taskflow;Username=postgres;Password=postgres
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: guest
+      RabbitMq__Password: guest
     ports:
       - "8080:8080"
     depends_on:
       postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  users-api:
+    build:
+      context: ../src
+      dockerfile: Services/UserService/Dockerfile
+    container_name: taskflow-users-api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__UserDatabase: Host=postgres-users;Port=5432;Database=userflow;Username=postgres;Password=postgres
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: guest
+      RabbitMq__Password: guest
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres-users:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   postgres:
@@ -31,5 +56,35 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres-users:
+    image: postgres:17
+    container_name: taskflow-postgres-users
+    environment:
+      POSTGRES_DB: userflow
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - taskflow-postgres-users-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d userflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: taskflow-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   taskflow-postgres-data:
+  taskflow-postgres-users-data:

@@ -1,6 +1,8 @@
+using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using TaskService;
 using TaskService.Application;
+using TaskService.Application.Consumers;
 using TaskService.Application.Tasks;
 using TaskService.Domain;
 using TaskService.Infrastructure.Persistence;
@@ -18,6 +20,22 @@ builder.Services.AddHealthChecks()
 
 builder.Services.AddScoped<ITaskRepository, TaskRepository>();
 builder.Services.AddScoped<TasksService>();
+
+builder.Services.AddMassTransit(x =>
+{
+    x.AddConsumer<UserRegisteredConsumer>();
+
+    x.UsingRabbitMq((context, cfg) =>
+    {
+        cfg.Host(builder.Configuration["RabbitMq:Host"] ?? "localhost", "/", h =>
+        {
+            h.Username(builder.Configuration["RabbitMq:Username"] ?? "guest");
+            h.Password(builder.Configuration["RabbitMq:Password"] ?? "guest");
+        });
+
+        cfg.ConfigureEndpoints(context);
+    });
+});
 
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddProblemDetails();
