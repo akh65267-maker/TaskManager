@@ -30,10 +30,10 @@ public class TasksService
 
     public async Task<Guid> CreateAsync(CreateTaskRequest request, CancellationToken cancellationToken = default)
     {
-        if (!await _knownUsers.ExistsAsync(request.OwnerId, cancellationToken))
-            throw new ArgumentException($"No known user with id '{request.OwnerId}'.", nameof(request));
-
         var task = new TaskItem(request.Title, request.OwnerId);
+
+        if (!await _knownUsers.ExistsAsync(task.OwnerId, cancellationToken))
+            throw new ArgumentException($"No known user with id '{task.OwnerId}'.", nameof(request));
 
         await _repo.AddAsync(task, cancellationToken);
 
