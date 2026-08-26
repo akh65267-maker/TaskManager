@@ -3,6 +3,9 @@
     <File Path="deploy/docker-compose.yml" />
   </Folder>
   <Folder Name="/src/" />
+  <Folder Name="/src/Gateway/">
+    <Project Path="src/Gateway/ApiGateway/ApiGateway.csproj" />
+  </Folder>
   <Folder Name="/src/Services/">
     <Project Path="src/Services/TaskService/TaskService.csproj" Id="5164dfad-5dfa-4ae5-ad7a-623f97d2009d" />
     <Project Path="src/Services/UserService/UserService.csproj" />
