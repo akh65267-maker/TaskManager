@@ -6,11 +6,13 @@ namespace TaskService.Application;
 public class TasksService
 {
     private readonly ITaskRepository _repo;
+    private readonly IKnownUserRepository _knownUsers;
     private readonly ILogger<TasksService> _logger;
 
-    public TasksService(ITaskRepository repo, ILogger<TasksService> logger)
+    public TasksService(ITaskRepository repo, IKnownUserRepository knownUsers, ILogger<TasksService> logger)
     {
         _repo = repo;
+        _knownUsers = knownUsers;
         _logger = logger;
     }
 
@@ -21,19 +23,24 @@ public class TasksService
         return tasks.Select(task => new TaskDto(
             task.Id,
             task.Title,
-            task.IsCompleted))
+            task.IsCompleted,
+            task.OwnerId))
         .ToList();
     }
 
     public async Task<Guid> CreateAsync(CreateTaskRequest request, CancellationToken cancellationToken = default)
     {
-        var task = new TaskItem(request.Title);
+        if (!await _knownUsers.ExistsAsync(request.OwnerId, cancellationToken))
+            throw new ArgumentException($"No known user with id '{request.OwnerId}'.", nameof(request));
+
+        var task = new TaskItem(request.Title, request.OwnerId);
 
         await _repo.AddAsync(task, cancellationToken);
 
         _logger.LogInformation(
-            "Creating task with title {Title}",
-            request.Title);
+            "Creating task with title {Title} for owner {OwnerId}",
+            request.Title,
+            request.OwnerId);
 
 
         return task.Id;
@@ -46,7 +53,7 @@ public class TasksService
         if (task is null)
             return null;
 
-        return new TaskDto(task.Id, task.Title, task.IsCompleted);
+        return new TaskDto(task.Id, task.Title, task.IsCompleted, task.OwnerId);
     }
 
     public async Task<bool> CompleteAsync(Guid id, CancellationToken cancellationToken = default)

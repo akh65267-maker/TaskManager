@@ -1,24 +1,27 @@
 using Contracts.IntegrationEvents;
 using MassTransit;
+using TaskService.Domain;
 
 namespace TaskService.Application.Consumers;
 
 public class UserRegisteredConsumer : IConsumer<UserRegistered>
 {
+    private readonly IKnownUserRepository _knownUsers;
     private readonly ILogger<UserRegisteredConsumer> _logger;
 
-    public UserRegisteredConsumer(ILogger<UserRegisteredConsumer> logger)
+    public UserRegisteredConsumer(IKnownUserRepository knownUsers, ILogger<UserRegisteredConsumer> logger)
     {
+        _knownUsers = knownUsers;
         _logger = logger;
     }
 
-    public Task Consume(ConsumeContext<UserRegistered> context)
+    public async Task Consume(ConsumeContext<UserRegistered> context)
     {
+        await _knownUsers.UpsertAsync(context.Message.UserId, context.Message.Email, context.CancellationToken);
+
         _logger.LogInformation(
-            "TaskService observed UserRegistered for {UserId} ({Email})",
+            "TaskService recorded known user {UserId} ({Email})",
             context.Message.UserId,
             context.Message.Email);
-
-        return Task.CompletedTask;
     }
 }

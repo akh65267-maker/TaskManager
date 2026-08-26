@@ -19,6 +19,7 @@ builder.Services.AddHealthChecks()
     .AddDbContextCheck<TaskDbContext>();
 
 builder.Services.AddScoped<ITaskRepository, TaskRepository>();
+builder.Services.AddScoped<IKnownUserRepository, KnownUserRepository>();
 builder.Services.AddScoped<TasksService>();
 
 builder.Services.AddMassTransit(x =>

@@ -10,6 +10,7 @@ public class TaskDbContext : DbContext
     }
 
     public DbSet<TaskItem> Tasks => Set<TaskItem>();
+    public DbSet<KnownUser> KnownUsers => Set<KnownUser>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -23,6 +24,18 @@ public class TaskDbContext : DbContext
 
             entity.Property(x => x.IsCompleted)
                 .IsRequired();
+
+            entity.Property(x => x.OwnerId)
+                .IsRequired();
+        });
+
+        modelBuilder.Entity<KnownUser>(entity =>
+        {
+            entity.HasKey(x => x.UserId);
+
+            entity.Property(x => x.Email)
+                .IsRequired()
+                .HasMaxLength(320);
         });
     }
 }
