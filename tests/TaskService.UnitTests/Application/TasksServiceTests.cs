@@ -24,7 +24,7 @@ public class TasksServiceTests
         _knownUsers.Setup(x => x.ExistsAsync(ownerId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         await Assert.ThrowsAsync<ArgumentException>(
-            () => _sut.CreateAsync(new CreateTaskRequest("Buy milk", ownerId)));
+            () => _sut.CreateAsync(new CreateTaskRequest("Buy milk"), ownerId));
 
         _taskRepo.Verify(x => x.AddAsync(It.IsAny<TaskItem>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -35,7 +35,7 @@ public class TasksServiceTests
         var ownerId = Guid.NewGuid();
         _knownUsers.Setup(x => x.ExistsAsync(ownerId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
-        var id = await _sut.CreateAsync(new CreateTaskRequest("Buy milk", ownerId));
+        var id = await _sut.CreateAsync(new CreateTaskRequest("Buy milk"), ownerId);
 
         Assert.NotEqual(Guid.Empty, id);
         _taskRepo.Verify(x => x.AddAsync(
@@ -49,7 +49,7 @@ public class TasksServiceTests
         var ownerId = Guid.NewGuid();
 
         await Assert.ThrowsAsync<ArgumentException>(
-            () => _sut.CreateAsync(new CreateTaskRequest("", ownerId)));
+            () => _sut.CreateAsync(new CreateTaskRequest(""), ownerId));
 
         _knownUsers.Verify(x => x.ExistsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -60,19 +60,33 @@ public class TasksServiceTests
         _taskRepo.Setup(x => x.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((TaskItem?)null);
 
-        var result = await _sut.CompleteAsync(Guid.NewGuid());
+        var result = await _sut.CompleteAsync(Guid.NewGuid(), Guid.NewGuid());
 
         Assert.False(result);
         _taskRepo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task CompleteAsync_KnownId_CompletesAndSaves()
+    public async Task CompleteAsync_OwnedByDifferentUser_ReturnsFalseWithoutCompleting()
     {
         var task = new TaskItem("Buy milk", Guid.NewGuid());
         _taskRepo.Setup(x => x.GetByIdAsync(task.Id, It.IsAny<CancellationToken>())).ReturnsAsync(task);
 
-        var result = await _sut.CompleteAsync(task.Id);
+        var result = await _sut.CompleteAsync(task.Id, Guid.NewGuid());
+
+        Assert.False(result);
+        Assert.False(task.IsCompleted);
+        _taskRepo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_OwnedByCaller_CompletesAndSaves()
+    {
+        var ownerId = Guid.NewGuid();
+        var task = new TaskItem("Buy milk", ownerId);
+        _taskRepo.Setup(x => x.GetByIdAsync(task.Id, It.IsAny<CancellationToken>())).ReturnsAsync(task);
+
+        var result = await _sut.CompleteAsync(task.Id, ownerId);
 
         Assert.True(result);
         Assert.True(task.IsCompleted);
@@ -85,7 +99,18 @@ public class TasksServiceTests
         _taskRepo.Setup(x => x.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((TaskItem?)null);
 
-        var result = await _sut.GetByIdAsync(Guid.NewGuid(), CancellationToken.None);
+        var result = await _sut.GetByIdAsync(Guid.NewGuid(), Guid.NewGuid(), CancellationToken.None);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_OwnedByDifferentUser_ReturnsNull()
+    {
+        var task = new TaskItem("Buy milk", Guid.NewGuid());
+        _taskRepo.Setup(x => x.GetByIdAsync(task.Id, It.IsAny<CancellationToken>())).ReturnsAsync(task);
+
+        var result = await _sut.GetByIdAsync(task.Id, Guid.NewGuid(), CancellationToken.None);
 
         Assert.Null(result);
     }

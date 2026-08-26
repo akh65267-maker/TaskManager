@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using UserService.Application;
 
 namespace UserService;
 
@@ -10,16 +11,23 @@ public class ApiExceptionHandler : IExceptionHandler
         Exception exception,
         CancellationToken cancellationToken)
     {
-        if (exception is not ArgumentException argumentException)
+        var (status, title) = exception switch
+        {
+            ArgumentException => (StatusCodes.Status400BadRequest, "Invalid request."),
+            InvalidCredentialsException => (StatusCodes.Status401Unauthorized, "Authentication failed."),
+            _ => (0, string.Empty)
+        };
+
+        if (status == 0)
             return false;
 
-        httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+        httpContext.Response.StatusCode = status;
 
         await httpContext.Response.WriteAsJsonAsync(new ProblemDetails
         {
-            Status = StatusCodes.Status400BadRequest,
-            Title = "Invalid request.",
-            Detail = argumentException.Message
+            Status = status,
+            Title = title,
+            Detail = exception.Message
         }, cancellationToken);
 
         return true;

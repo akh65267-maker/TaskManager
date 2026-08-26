@@ -27,6 +27,9 @@ services:
       RabbitMq__Host: rabbitmq
       RabbitMq__Username: guest
       RabbitMq__Password: guest
+      Jwt__Key: dev-only-insecure-signing-key-change-me-32bytes
+      Jwt__Issuer: TaskManager
+      Jwt__Audience: TaskManager
     ports:
       - "8080:8080"
     depends_on:
@@ -47,6 +50,9 @@ services:
       RabbitMq__Host: rabbitmq
       RabbitMq__Username: guest
       RabbitMq__Password: guest
+      Jwt__Key: dev-only-insecure-signing-key-change-me-32bytes
+      Jwt__Issuer: TaskManager
+      Jwt__Audience: TaskManager
     ports:
       - "8081:8080"
     depends_on:

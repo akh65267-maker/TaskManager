@@ -1,10 +1,14 @@
+using System.Text;
 using MassTransit;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using UserService;
 using UserService.Application;
 using UserService.Application.Users;
 using UserService.Domain;
 using UserService.Infrastructure.Persistence;
+using UserService.Infrastructure.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,7 +22,33 @@ builder.Services.AddHealthChecks()
     .AddDbContextCheck<UserDbContext>();
 
 builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
+builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 builder.Services.AddScoped<UsersService>();
+
+var jwtKey = builder.Configuration["Jwt:Key"]
+    ?? throw new InvalidOperationException("Jwt:Key configuration is missing.");
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "TaskManager";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "TaskManager";
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = jwtIssuer,
+            ValidateAudience = true,
+            ValidAudience = jwtAudience,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ValidateLifetime = true,
+        };
+    });
+
+builder.Services.AddAuthorization();
 
 builder.Services.AddMassTransit(x =>
 {
@@ -46,6 +76,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.MapGet("/users", async (
     UsersService service,
     CancellationToken cancellationToken) =>
@@ -53,7 +86,7 @@ app.MapGet("/users", async (
     var users = await service.GetAllAsync(cancellationToken);
 
     return Results.Ok(users);
-});
+}).RequireAuthorization();
 
 app.MapGet("/users/{id:guid}", async (
     Guid id,
@@ -63,7 +96,7 @@ app.MapGet("/users/{id:guid}", async (
     var user = await service.GetByIdAsync(id, cancellationToken);
 
     return user is null ? Results.NotFound() : Results.Ok(user);
-});
+}).RequireAuthorization();
 
 app.MapPost("/users", async (
     RegisterUserRequest request,
@@ -73,6 +106,16 @@ app.MapPost("/users", async (
     var id = await service.RegisterAsync(request, cancellationToken);
 
     return Results.Created($"/users/{id}", new { id });
+});
+
+app.MapPost("/users/login", async (
+    LoginRequest request,
+    UsersService service,
+    CancellationToken cancellationToken) =>
+{
+    var result = await service.LoginAsync(request, cancellationToken);
+
+    return Results.Ok(result);
 });
 
 app.UseExceptionHandler();

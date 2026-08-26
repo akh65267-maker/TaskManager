@@ -18,10 +18,11 @@ public class TaskRepository : ITaskRepository
         await _db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyCollection<TaskItem>> GetAllAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyCollection<TaskItem>> GetAllByOwnerAsync(Guid ownerId, CancellationToken cancellationToken = default)
     {
         return await _db.Tasks
             .AsNoTracking()
+            .Where(x => x.OwnerId == ownerId)
             .ToListAsync(cancellationToken);
     }
 
