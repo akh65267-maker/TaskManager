@@ -10,12 +10,14 @@ services:
       ReverseProxy__Clusters__tasks-cluster__Destinations__destination1__Address: http://tasks-api:8080/
       ReverseProxy__Clusters__users-cluster__Destinations__destination1__Address: http://users-api:8080/
       ReverseProxy__Clusters__catalog-cluster__Destinations__destination1__Address: http://catalog-api:8080/
+      ReverseProxy__Clusters__inventory-cluster__Destinations__destination1__Address: http://inventory-api:8080/
     ports:
       - "8000:8080"
     depends_on:
       - tasks-api
       - users-api
       - catalog-api
+      - inventory-api
 
   tasks-api:
     build:
@@ -81,6 +83,24 @@ services:
       postgres-catalog:
         condition: service_healthy
 
+  inventory-api:
+    build:
+      context: ../src
+      dockerfile: Services/InventoryService/Dockerfile
+    container_name: taskflow-inventory-api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__InventoryDatabase: Host=postgres-inventory;Port=5432;Database=inventoryflow;Username=postgres;Password=postgres
+      Jwt__Key: dev-only-insecure-signing-key-change-me-32bytes
+      Jwt__Issuer: TaskManager
+      Jwt__Audience: TaskManager
+    ports:
+      - "8083:8080"
+    depends_on:
+      postgres-inventory:
+        condition: service_healthy
+
   postgres:
     image: postgres:17
     container_name: taskflow-postgres
@@ -132,6 +152,23 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres-inventory:
+    image: postgres:17
+    container_name: taskflow-postgres-inventory
+    environment:
+      POSTGRES_DB: inventoryflow
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5435:5432"
+    volumes:
+      - taskflow-postgres-inventory-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d inventoryflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   rabbitmq:
     image: rabbitmq:3-management
     container_name: taskflow-rabbitmq
@@ -148,3 +185,4 @@ volumes:
   taskflow-postgres-data:
   taskflow-postgres-users-data:
   taskflow-postgres-catalog-data:
+  taskflow-postgres-inventory-data:

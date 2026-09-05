@@ -8,6 +8,7 @@
   </Folder>
   <Folder Name="/src/Services/">
     <Project Path="src/Services/CatalogService/CatalogService.csproj" />
+    <Project Path="src/Services/InventoryService/InventoryService.csproj" />
     <Project Path="src/Services/TaskService/TaskService.csproj" Id="5164dfad-5dfa-4ae5-ad7a-623f97d2009d" />
     <Project Path="src/Services/UserService/UserService.csproj" />
   </Folder>
@@ -16,6 +17,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/CatalogService.UnitTests/CatalogService.UnitTests.csproj" />
+    <Project Path="tests/InventoryService.UnitTests/InventoryService.UnitTests.csproj" />
     <Project Path="tests/TaskService.UnitTests/TaskService.UnitTests.csproj" />
     <Project Path="tests/UserService.UnitTests/UserService.UnitTests.csproj" />
   </Folder>
