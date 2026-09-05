@@ -7,6 +7,7 @@
     <Project Path="src/Gateway/ApiGateway/ApiGateway.csproj" />
   </Folder>
   <Folder Name="/src/Services/">
+    <Project Path="src/Services/CatalogService/CatalogService.csproj" />
     <Project Path="src/Services/TaskService/TaskService.csproj" Id="5164dfad-5dfa-4ae5-ad7a-623f97d2009d" />
     <Project Path="src/Services/UserService/UserService.csproj" />
   </Folder>
@@ -14,6 +15,7 @@
     <Project Path="src/Shared/Contracts/Contracts.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/CatalogService.UnitTests/CatalogService.UnitTests.csproj" />
     <Project Path="tests/TaskService.UnitTests/TaskService.UnitTests.csproj" />
     <Project Path="tests/UserService.UnitTests/UserService.UnitTests.csproj" />
   </Folder>

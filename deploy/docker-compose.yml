@@ -9,11 +9,13 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ReverseProxy__Clusters__tasks-cluster__Destinations__destination1__Address: http://tasks-api:8080/
       ReverseProxy__Clusters__users-cluster__Destinations__destination1__Address: http://users-api:8080/
+      ReverseProxy__Clusters__catalog-cluster__Destinations__destination1__Address: http://catalog-api:8080/
     ports:
       - "8000:8080"
     depends_on:
       - tasks-api
       - users-api
+      - catalog-api
 
   tasks-api:
     build:
@@ -61,6 +63,24 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  catalog-api:
+    build:
+      context: ../src
+      dockerfile: Services/CatalogService/Dockerfile
+    container_name: taskflow-catalog-api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__CatalogDatabase: Host=postgres-catalog;Port=5432;Database=catalogflow;Username=postgres;Password=postgres
+      Jwt__Key: dev-only-insecure-signing-key-change-me-32bytes
+      Jwt__Issuer: TaskManager
+      Jwt__Audience: TaskManager
+    ports:
+      - "8082:8080"
+    depends_on:
+      postgres-catalog:
+        condition: service_healthy
+
   postgres:
     image: postgres:17
     container_name: taskflow-postgres
@@ -95,6 +115,23 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres-catalog:
+    image: postgres:17
+    container_name: taskflow-postgres-catalog
+    environment:
+      POSTGRES_DB: catalogflow
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - taskflow-postgres-catalog-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d catalogflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   rabbitmq:
     image: rabbitmq:3-management
     container_name: taskflow-rabbitmq
@@ -110,3 +147,4 @@ services:
 volumes:
   taskflow-postgres-data:
   taskflow-postgres-users-data:
+  taskflow-postgres-catalog-data:
