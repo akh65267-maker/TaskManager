@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using MassTransit;
+using Microsoft.EntityFrameworkCore;
 using TaskService.Domain;
 
 namespace TaskService.Infrastructure.Persistence;
@@ -37,5 +38,9 @@ public class TaskDbContext : DbContext
                 .IsRequired()
                 .HasMaxLength(320);
         });
+
+        modelBuilder.AddInboxStateEntity();
+        modelBuilder.AddOutboxStateEntity();
+        modelBuilder.AddOutboxMessageEntity();
     }
 }

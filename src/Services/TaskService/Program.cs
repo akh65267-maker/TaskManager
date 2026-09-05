@@ -52,6 +52,11 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddMassTransit(x =>
 {
+    x.AddEntityFrameworkOutbox<TaskDbContext>(o =>
+    {
+        o.UsePostgres();
+    });
+
     x.AddConsumer<UserRegisteredConsumer>();
 
     x.UsingRabbitMq((context, cfg) =>
@@ -62,7 +67,15 @@ builder.Services.AddMassTransit(x =>
             h.Password(builder.Configuration["RabbitMq:Password"] ?? "guest");
         });
 
-        cfg.ConfigureEndpoints(context);
+        // Explicit receive endpoint (instead of convention-based ConfigureEndpoints)
+        // so we can attach the EF Core inbox: it deduplicates by MessageId+ConsumerId
+        // via InboxState, skipping the consumer entirely on redelivery of the same
+        // message instead of relying only on KnownUserRepository's own existence check.
+        cfg.ReceiveEndpoint("UserRegistered", e =>
+        {
+            e.UseEntityFrameworkOutbox<TaskDbContext>(context);
+            e.ConfigureConsumer<UserRegisteredConsumer>(context);
+        });
     });
 });
 
