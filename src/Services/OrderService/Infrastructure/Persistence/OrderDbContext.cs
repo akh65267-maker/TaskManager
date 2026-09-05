@@ -1,4 +1,6 @@
+using MassTransit;
 using Microsoft.EntityFrameworkCore;
+using OrderService.Application.Sagas;
 using OrderService.Domain;
 
 namespace OrderService.Infrastructure.Persistence;
@@ -10,6 +12,7 @@ public class OrderDbContext : DbContext
     }
 
     public DbSet<Order> Orders => Set<Order>();
+    public DbSet<OrderSagaState> OrderSagaStates => Set<OrderSagaState>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -41,5 +44,18 @@ public class OrderDbContext : DbContext
                 item.Property(i => i.UnitPrice).IsRequired().HasPrecision(18, 2);
             });
         });
+
+        modelBuilder.Entity<OrderSagaState>(entity =>
+        {
+            entity.HasKey(x => x.CorrelationId);
+            entity.Property(x => x.CurrentState).IsRequired().HasMaxLength(64);
+            entity.Property(x => x.RowVersion).IsRowVersion();
+            entity.Property(x => x.ItemsJson).IsRequired();
+            entity.Property(x => x.ReservedProductIdsJson).IsRequired();
+        });
+
+        modelBuilder.AddInboxStateEntity();
+        modelBuilder.AddOutboxStateEntity();
+        modelBuilder.AddOutboxMessageEntity();
     }
 }

@@ -1,3 +1,5 @@
+using Contracts.IntegrationEvents;
+using MassTransit;
 using Microsoft.Extensions.Logging;
 using Moq;
 using OrderService.Application;
@@ -9,11 +11,12 @@ namespace OrderService.UnitTests.Application;
 public class OrdersServiceTests
 {
     private readonly Mock<IOrderRepository> _repo = new();
+    private readonly Mock<IPublishEndpoint> _publishEndpoint = new();
     private readonly OrdersService _sut;
 
     public OrdersServiceTests()
     {
-        _sut = new OrdersService(_repo.Object, Mock.Of<ILogger<OrdersService>>());
+        _sut = new OrdersService(_repo.Object, _publishEndpoint.Object, Mock.Of<ILogger<OrdersService>>());
     }
 
     [Fact]
@@ -41,6 +44,28 @@ public class OrdersServiceTests
             It.Is<Order>(o => o.UserId == userId && o.TotalAmount == 20m),
             It.IsAny<CancellationToken>()), Times.Once);
         _repo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateAsync_WithValidRequest_PublishesOrderSubmittedBeforeSaving()
+    {
+        var sequence = new MockSequence();
+        var userId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var request = new CreateOrderRequest(new[] { new OrderItemRequest(productId, 2, 10m) });
+
+        _repo.InSequence(sequence).Setup(x => x.AddAsync(It.IsAny<Order>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _publishEndpoint.InSequence(sequence).Setup(x => x.Publish(It.IsAny<OrderSubmitted>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _repo.InSequence(sequence).Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await _sut.CreateAsync(request, userId);
+
+        _publishEndpoint.Verify(x => x.Publish(
+            It.Is<OrderSubmitted>(e => e.UserId == userId && e.Items.Count == 1),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

@@ -1,9 +1,11 @@
 using System.Text;
 using InventoryService;
 using InventoryService.Application;
+using InventoryService.Application.Consumers;
 using InventoryService.Application.Inventory;
 using InventoryService.Domain;
 using InventoryService.Infrastructure.Persistence;
+using MassTransit;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -45,6 +47,23 @@ builder.Services
     });
 
 builder.Services.AddAuthorization();
+
+builder.Services.AddMassTransit(x =>
+{
+    x.AddConsumer<ReserveStockConsumer>();
+    x.AddConsumer<ReleaseStockConsumer>();
+
+    x.UsingRabbitMq((context, cfg) =>
+    {
+        cfg.Host(builder.Configuration["RabbitMq:Host"] ?? "localhost", "/", h =>
+        {
+            h.Username(builder.Configuration["RabbitMq:Username"] ?? "guest");
+            h.Password(builder.Configuration["RabbitMq:Password"] ?? "guest");
+        });
+
+        cfg.ConfigureEndpoints(context);
+    });
+});
 
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddProblemDetails();

@@ -8,6 +8,7 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["Services/InventoryService/InventoryService.csproj", "Services/InventoryService/"]
+COPY ["Shared/Contracts/Contracts.csproj", "Shared/Contracts/"]
 RUN dotnet restore "./Services/InventoryService/InventoryService.csproj"
 COPY . .
 WORKDIR "/src/Services/InventoryService"

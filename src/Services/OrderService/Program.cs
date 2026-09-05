@@ -1,11 +1,13 @@
 using System.Security.Claims;
 using System.Text;
+using MassTransit;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using OrderService;
 using OrderService.Application;
 using OrderService.Application.Orders;
+using OrderService.Application.Sagas;
 using OrderService.Domain;
 using OrderService.Infrastructure.Persistence;
 
@@ -46,6 +48,33 @@ builder.Services
     });
 
 builder.Services.AddAuthorization();
+
+builder.Services.AddMassTransit(x =>
+{
+    x.AddEntityFrameworkOutbox<OrderDbContext>(o =>
+    {
+        o.UsePostgres();
+        o.UseBusOutbox();
+    });
+
+    x.AddSagaStateMachine<OrderSagaStateMachine, OrderSagaState>()
+        .EntityFrameworkRepository(r =>
+        {
+            r.ExistingDbContext<OrderDbContext>();
+            r.UsePostgres();
+        });
+
+    x.UsingRabbitMq((context, cfg) =>
+    {
+        cfg.Host(builder.Configuration["RabbitMq:Host"] ?? "localhost", "/", h =>
+        {
+            h.Username(builder.Configuration["RabbitMq:Username"] ?? "guest");
+            h.Password(builder.Configuration["RabbitMq:Password"] ?? "guest");
+        });
+
+        cfg.ConfigureEndpoints(context);
+    });
+});
 
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddProblemDetails();

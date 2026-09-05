@@ -96,6 +96,9 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__InventoryDatabase: Host=postgres-inventory;Port=5432;Database=inventoryflow;Username=postgres;Password=postgres
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: guest
+      RabbitMq__Password: guest
       Jwt__Key: dev-only-insecure-signing-key-change-me-32bytes
       Jwt__Issuer: TaskManager
       Jwt__Audience: TaskManager
@@ -103,6 +106,8 @@ services:
       - "8083:8080"
     depends_on:
       postgres-inventory:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   basket-api:
@@ -132,6 +137,9 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__OrderDatabase: Host=postgres-order;Port=5432;Database=orderflow;Username=postgres;Password=postgres
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: guest
+      RabbitMq__Password: guest
       Jwt__Key: dev-only-insecure-signing-key-change-me-32bytes
       Jwt__Issuer: TaskManager
       Jwt__Audience: TaskManager
@@ -139,6 +147,8 @@ services:
       - "8085:8080"
     depends_on:
       postgres-order:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   postgres:
