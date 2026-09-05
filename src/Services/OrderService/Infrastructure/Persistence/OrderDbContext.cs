@@ -20,6 +20,11 @@ public class OrderDbContext : DbContext
             entity.Property(x => x.UserId)
                 .IsRequired();
 
+            entity.Property(x => x.Status)
+                .IsRequired()
+                .HasConversion<string>()
+                .HasMaxLength(20);
+
             entity.Property(x => x.CreatedAtUtc)
                 .IsRequired();
 

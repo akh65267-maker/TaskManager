@@ -20,4 +20,23 @@ public class InventoryItem
         ProductId = productId;
         QuantityAvailable = quantityAvailable;
     }
+
+    public void Reserve(int quantity)
+    {
+        if (quantity <= 0)
+            throw new ArgumentException("Quantity must be positive.", nameof(quantity));
+
+        if (quantity > QuantityAvailable)
+            throw new InsufficientStockException(ProductId, quantity, QuantityAvailable);
+
+        QuantityAvailable -= quantity;
+    }
+
+    public void Release(int quantity)
+    {
+        if (quantity <= 0)
+            throw new ArgumentException("Quantity must be positive.", nameof(quantity));
+
+        QuantityAvailable += quantity;
+    }
 }

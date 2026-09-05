@@ -1,3 +1,5 @@
+using OrderService.Domain;
+
 namespace OrderService.Application.Orders;
 
 public sealed record OrderDto(
@@ -5,4 +7,5 @@ public sealed record OrderDto(
     Guid UserId,
     IReadOnlyCollection<OrderItemDto> Items,
     decimal TotalAmount,
+    OrderStatus Status,
     DateTimeOffset CreatedAtUtc);
