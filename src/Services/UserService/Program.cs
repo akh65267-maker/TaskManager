@@ -52,6 +52,12 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddMassTransit(x =>
 {
+    x.AddEntityFrameworkOutbox<UserDbContext>(o =>
+    {
+        o.UsePostgres();
+        o.UseBusOutbox();
+    });
+
     x.UsingRabbitMq((context, cfg) =>
     {
         cfg.Host(builder.Configuration["RabbitMq:Host"] ?? "localhost", "/", h =>

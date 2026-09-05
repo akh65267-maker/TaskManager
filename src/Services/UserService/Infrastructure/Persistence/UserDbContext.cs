@@ -1,3 +1,4 @@
+using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using UserService.Domain;
 
@@ -27,5 +28,8 @@ public class UserDbContext : DbContext
                 .IsRequired()
                 .HasMaxLength(200);
         });
+
+        modelBuilder.AddOutboxMessageEntity();
+        modelBuilder.AddOutboxStateEntity();
     }
 }

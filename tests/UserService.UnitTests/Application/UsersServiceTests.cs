@@ -76,6 +76,27 @@ public class UsersServiceTests
         _publishEndpoint.Verify(x => x.Publish(
             It.Is<UserRegistered>(e => e.Email == "new@example.com" && e.UserId == id),
             It.IsAny<CancellationToken>()), Times.Once);
+
+        _userRepo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RegisterAsync_PublishesBeforeSavingChanges()
+    {
+        // With the transactional outbox, Publish must be buffered before the
+        // single SaveChangesAsync call that commits it — publishing after
+        // SaveChangesAsync would mean the message never gets flushed.
+        var sequence = new MockSequence();
+        _passwordHasher.Setup(x => x.Hash(It.IsAny<string>())).Returns("hashed");
+        _userRepo.Setup(x => x.EmailExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        _userRepo.InSequence(sequence).Setup(x => x.AddAsync(It.IsAny<User>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _publishEndpoint.InSequence(sequence).Setup(x => x.Publish(It.IsAny<UserRegistered>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _userRepo.InSequence(sequence).Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await _sut.RegisterAsync(new RegisterUserRequest("new@example.com", "New Person", "password123"));
     }
 
     [Fact]

@@ -54,11 +54,19 @@ public class UsersService
 
         await _repo.AddAsync(user, cancellationToken);
 
-        _logger.LogInformation("Registered user {UserId} with email {Email}", user.Id, user.Email);
-
         await _publishEndpoint.Publish(
             new UserRegistered(user.Id, user.Email, DateTimeOffset.UtcNow),
             cancellationToken);
+
+        // Single SaveChangesAsync commits both the user row and the buffered
+        // outbox message in one DB transaction (MassTransit's UseBusOutbox
+        // intercepts SaveChanges to flush the outbox atomically with it).
+        // Publish must be called before this, not after: if Publish is called
+        // after SaveChangesAsync already committed, the outbox never gets a
+        // SaveChanges call to flush into, and the message is silently lost.
+        await _repo.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Registered user {UserId} with email {Email}", user.Id, user.Email);
 
         return user.Id;
     }
