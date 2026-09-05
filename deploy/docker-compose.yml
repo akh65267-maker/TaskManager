@@ -12,6 +12,7 @@ services:
       ReverseProxy__Clusters__catalog-cluster__Destinations__destination1__Address: http://catalog-api:8080/
       ReverseProxy__Clusters__inventory-cluster__Destinations__destination1__Address: http://inventory-api:8080/
       ReverseProxy__Clusters__basket-cluster__Destinations__destination1__Address: http://basket-api:8080/
+      ReverseProxy__Clusters__order-cluster__Destinations__destination1__Address: http://order-api:8080/
     ports:
       - "8000:8080"
     depends_on:
@@ -20,6 +21,7 @@ services:
       - catalog-api
       - inventory-api
       - basket-api
+      - order-api
 
   tasks-api:
     build:
@@ -121,6 +123,24 @@ services:
       redis:
         condition: service_healthy
 
+  order-api:
+    build:
+      context: ../src
+      dockerfile: Services/OrderService/Dockerfile
+    container_name: taskflow-order-api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__OrderDatabase: Host=postgres-order;Port=5432;Database=orderflow;Username=postgres;Password=postgres
+      Jwt__Key: dev-only-insecure-signing-key-change-me-32bytes
+      Jwt__Issuer: TaskManager
+      Jwt__Audience: TaskManager
+    ports:
+      - "8085:8080"
+    depends_on:
+      postgres-order:
+        condition: service_healthy
+
   postgres:
     image: postgres:17
     container_name: taskflow-postgres
@@ -189,6 +209,23 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres-order:
+    image: postgres:17
+    container_name: taskflow-postgres-order
+    environment:
+      POSTGRES_DB: orderflow
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5436:5432"
+    volumes:
+      - taskflow-postgres-order-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d orderflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   rabbitmq:
     image: rabbitmq:3-management
     container_name: taskflow-rabbitmq
@@ -217,3 +254,4 @@ volumes:
   taskflow-postgres-users-data:
   taskflow-postgres-catalog-data:
   taskflow-postgres-inventory-data:
+  taskflow-postgres-order-data:
