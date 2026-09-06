@@ -1,4 +1,5 @@
 using InventoryService.Domain;
+using MassTransit;
 using Microsoft.EntityFrameworkCore;
 
 namespace InventoryService.Infrastructure.Persistence;
@@ -20,5 +21,9 @@ public class InventoryDbContext : DbContext
             entity.Property(x => x.QuantityAvailable)
                 .IsRequired();
         });
+
+        modelBuilder.AddInboxStateEntity();
+        modelBuilder.AddOutboxStateEntity();
+        modelBuilder.AddOutboxMessageEntity();
     }
 }

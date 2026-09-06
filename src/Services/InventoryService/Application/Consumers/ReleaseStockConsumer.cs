@@ -26,6 +26,9 @@ public class ReleaseStockConsumer : IConsumer<ReleaseStock>
                 "Cannot release stock for unknown product {ProductId} (order {OrderId})",
                 message.ProductId,
                 message.OrderId);
+
+            // Still commit so this message's inbox (dedup) entry is recorded.
+            await _repo.SaveChangesAsync(context.CancellationToken);
             return;
         }
 

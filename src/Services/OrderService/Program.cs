@@ -132,3 +132,7 @@ app.MapHealthChecks("/health");
 app.UseHttpsRedirection();
 
 app.Run();
+
+public partial class Program
+{
+}

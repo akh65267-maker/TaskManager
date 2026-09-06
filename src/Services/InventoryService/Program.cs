@@ -50,6 +50,11 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddMassTransit(x =>
 {
+    x.AddEntityFrameworkOutbox<InventoryDbContext>(o =>
+    {
+        o.UsePostgres();
+    });
+
     x.AddConsumer<ReserveStockConsumer>();
     x.AddConsumer<ReleaseStockConsumer>();
 
@@ -61,7 +66,22 @@ builder.Services.AddMassTransit(x =>
             h.Password(builder.Configuration["RabbitMq:Password"] ?? "guest");
         });
 
-        cfg.ConfigureEndpoints(context);
+        // Explicit receive endpoints (not convention-based ConfigureEndpoints)
+        // so the EF Core inbox can be attached: it deduplicates by
+        // MessageId+ConsumerId, closing the gap where a redelivered
+        // ReserveStock could double-reserve stock. Endpoint names kept
+        // identical to what the convention already produced.
+        cfg.ReceiveEndpoint("ReserveStock", e =>
+        {
+            e.UseEntityFrameworkOutbox<InventoryDbContext>(context);
+            e.ConfigureConsumer<ReserveStockConsumer>(context);
+        });
+
+        cfg.ReceiveEndpoint("ReleaseStock", e =>
+        {
+            e.UseEntityFrameworkOutbox<InventoryDbContext>(context);
+            e.ConfigureConsumer<ReleaseStockConsumer>(context);
+        });
     });
 });
 
@@ -118,3 +138,7 @@ app.MapHealthChecks("/health");
 app.UseHttpsRedirection();
 
 app.Run();
+
+public partial class Program
+{
+}
