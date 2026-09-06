@@ -16,6 +16,13 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("OrderDatabase")
     ?? throw new InvalidOperationException("OrderDatabase connection string is missing.");
 
+// Deliberately not using EnableRetryOnFailure here: EF Core's retrying
+// execution strategy doesn't support user-initiated transactions, and
+// MassTransit's saga repository wraps each message in exactly that kind
+// of explicit transaction (visible as "SELECT ... FOR UPDATE" + saga
+// save in one transaction in the logs). Message-level retry
+// (UseMessageRetry, below) already covers this class of transient
+// failure at a layer that's actually compatible with the saga.
 builder.Services.AddDbContext<OrderDbContext>(options =>
     options.UseNpgsql(connectionString));
 
@@ -82,6 +89,17 @@ builder.Services.AddMassTransit(x =>
         // recoverable race, not a real failure, so retry a few times rather
         // than faulting the message.
         cfg.UseMessageRetry(r => r.Intervals(100, 250, 500, 1000));
+
+        // Stops hammering a dependency that's genuinely down (as opposed to
+        // the momentary concurrency conflicts UseMessageRetry above handles)
+        // instead of retrying every message indefinitely.
+        cfg.UseCircuitBreaker(cb =>
+        {
+            cb.TrackingPeriod = TimeSpan.FromMinutes(1);
+            cb.TripThreshold = 15;
+            cb.ActiveThreshold = 10;
+            cb.ResetInterval = TimeSpan.FromMinutes(5);
+        });
 
         cfg.ConfigureEndpoints(context);
     });

@@ -16,6 +16,12 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("TaskDatabase")
     ?? throw new InvalidOperationException("TaskDatabase connection string is missing.");
 
+// Deliberately not using EnableRetryOnFailure: this DbContext is used by
+// MassTransit's EF Core inbox (UseEntityFrameworkOutbox on the
+// UserRegistered receive endpoint), which wraps each message in an
+// explicit transaction - incompatible with EF's retrying execution
+// strategy. Message-level retry (UseMessageRetry, below) covers this
+// instead, at a layer that's actually compatible.
 builder.Services.AddDbContext<TaskDbContext>(options =>
     options.UseNpgsql(connectionString));
 
@@ -73,6 +79,19 @@ builder.Services.AddMassTransit(x =>
         // message instead of relying only on KnownUserRepository's own existence check.
         cfg.ReceiveEndpoint("UserRegistered", e =>
         {
+            // Retries a handful of times with backoff for transient failures
+            // (a Postgres blip, a lock timeout), then a circuit breaker stops
+            // hammering a dependency that's genuinely down instead of
+            // retrying every single message indefinitely.
+            e.UseMessageRetry(r => r.Intervals(100, 500, 1000, 5000));
+            e.UseCircuitBreaker(cb =>
+            {
+                cb.TrackingPeriod = TimeSpan.FromMinutes(1);
+                cb.TripThreshold = 15;
+                cb.ActiveThreshold = 10;
+                cb.ResetInterval = TimeSpan.FromMinutes(5);
+            });
+
             e.UseEntityFrameworkOutbox<TaskDbContext>(context);
             e.ConfigureConsumer<UserRegisteredConsumer>(context);
         });

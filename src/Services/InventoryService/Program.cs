@@ -15,6 +15,11 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("InventoryDatabase")
     ?? throw new InvalidOperationException("InventoryDatabase connection string is missing.");
 
+// Deliberately not using EnableRetryOnFailure: this DbContext is used by
+// MassTransit's EF Core inbox/outbox on the ReserveStock/ReleaseStock
+// receive endpoints, which wrap each message in an explicit transaction -
+// incompatible with EF's retrying execution strategy. Message-level
+// retry (UseMessageRetry, below) covers this instead.
 builder.Services.AddDbContext<InventoryDbContext>(options =>
     options.UseNpgsql(connectionString));
 
@@ -64,6 +69,18 @@ builder.Services.AddMassTransit(x =>
         {
             h.Username(builder.Configuration["RabbitMq:Username"] ?? "guest");
             h.Password(builder.Configuration["RabbitMq:Password"] ?? "guest");
+        });
+
+        // Retries a handful of times with backoff for transient failures,
+        // then a circuit breaker stops hammering a dependency that's
+        // genuinely down. Applies to every endpoint configured below.
+        cfg.UseMessageRetry(r => r.Intervals(100, 500, 1000, 5000));
+        cfg.UseCircuitBreaker(cb =>
+        {
+            cb.TrackingPeriod = TimeSpan.FromMinutes(1);
+            cb.TripThreshold = 15;
+            cb.ActiveThreshold = 10;
+            cb.ResetInterval = TimeSpan.FromMinutes(5);
         });
 
         // Explicit receive endpoints (not convention-based ConfigureEndpoints)

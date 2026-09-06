@@ -15,6 +15,10 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("UserDatabase")
     ?? throw new InvalidOperationException("UserDatabase connection string is missing.");
 
+// Deliberately not using EnableRetryOnFailure: this DbContext backs
+// MassTransit's transactional outbox (UseBusOutbox), which wraps
+// SaveChanges in a way that's incompatible with EF's retrying
+// execution strategy.
 builder.Services.AddDbContext<UserDbContext>(options =>
     options.UseNpgsql(connectionString));
 

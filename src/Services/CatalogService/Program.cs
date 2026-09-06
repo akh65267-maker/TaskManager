@@ -14,7 +14,8 @@ var connectionString = builder.Configuration.GetConnectionString("CatalogDatabas
     ?? throw new InvalidOperationException("CatalogDatabase connection string is missing.");
 
 builder.Services.AddDbContext<CatalogDbContext>(options =>
-    options.UseNpgsql(connectionString));
+    options.UseNpgsql(connectionString, npgsql =>
+        npgsql.EnableRetryOnFailure(maxRetryCount: 5, maxRetryDelay: TimeSpan.FromSeconds(10), errorCodesToAdd: null)));
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<CatalogDbContext>();
