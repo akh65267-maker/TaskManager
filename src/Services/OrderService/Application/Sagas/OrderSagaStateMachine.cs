@@ -68,6 +68,7 @@ public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
 
             When(StockReservationFailedEvent)
                 .Then(context => context.Saga.HasFailure = true)
+                .Then(context => context.Saga.FailureReason ??= context.Message.Reason)
                 .Then(context => context.Saga.ResponseCount++)
                 .IfElse(context => context.Saga.ResponseCount >= context.Saga.TotalItems,
                     complete => complete.ThenAsync(FinalizeAsync).Finalize(),
@@ -99,7 +100,7 @@ public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
                     await context.Publish(new ReleaseStock(saga.CorrelationId, productId, item.Quantity));
             }
 
-            order.Cancel();
+            order.Cancel(saga.FailureReason ?? "Unable to reserve stock for one or more items.");
         }
         else
         {

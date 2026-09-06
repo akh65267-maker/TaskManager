@@ -7,6 +7,7 @@ public class Order
     public List<OrderItem> Items { get; private set; }
     public OrderStatus Status { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
+    public string? CancellationReason { get; private set; }
 
     public decimal TotalAmount => Items.Sum(i => i.Quantity * i.UnitPrice);
 
@@ -37,11 +38,12 @@ public class Order
         Status = OrderStatus.Confirmed;
     }
 
-    public void Cancel()
+    public void Cancel(string reason)
     {
         if (Status != OrderStatus.Pending)
             throw new InvalidOperationException($"Cannot cancel an order in status '{Status}'.");
 
         Status = OrderStatus.Cancelled;
+        CancellationReason = reason;
     }
 }

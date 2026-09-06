@@ -126,7 +126,7 @@ app.MapGet("/inventory", async (
     var items = await service.GetAllAsync(cancellationToken);
 
     return Results.Ok(items);
-}).RequireAuthorization();
+});
 
 app.MapGet("/inventory/{productId:guid}", async (
     Guid productId,
@@ -136,7 +136,7 @@ app.MapGet("/inventory/{productId:guid}", async (
     var item = await service.GetByProductIdAsync(productId, cancellationToken);
 
     return item is null ? Results.NotFound() : Results.Ok(item);
-}).RequireAuthorization();
+});
 
 app.MapPost("/inventory", async (
     CreateInventoryItemRequest request,

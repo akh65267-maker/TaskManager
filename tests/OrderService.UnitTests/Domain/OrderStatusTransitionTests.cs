@@ -26,13 +26,14 @@ public class OrderStatusTransitionTests
     }
 
     [Fact]
-    public void Cancel_FromPending_TransitionsToCancelled()
+    public void Cancel_FromPending_TransitionsToCancelledWithReason()
     {
         var order = NewPendingOrder();
 
-        order.Cancel();
+        order.Cancel("Out of stock.");
 
         Assert.Equal(OrderStatus.Cancelled, order.Status);
+        Assert.Equal("Out of stock.", order.CancellationReason);
     }
 
     [Fact]
@@ -50,6 +51,6 @@ public class OrderStatusTransitionTests
         var order = NewPendingOrder();
         order.Confirm();
 
-        Assert.Throws<InvalidOperationException>(() => order.Cancel());
+        Assert.Throws<InvalidOperationException>(() => order.Cancel("Out of stock."));
     }
 }

@@ -8,4 +8,5 @@ public sealed record OrderDto(
     IReadOnlyCollection<OrderItemDto> Items,
     decimal TotalAmount,
     OrderStatus Status,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    string? CancellationReason);

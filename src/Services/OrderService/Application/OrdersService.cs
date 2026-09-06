@@ -74,6 +74,7 @@ public class OrdersService
             order.Items.Select(i => new OrderItemDto(i.ProductId, i.Quantity, i.UnitPrice)).ToList(),
             order.TotalAmount,
             order.Status,
-            order.CreatedAtUtc);
+            order.CreatedAtUtc,
+            order.CancellationReason);
     }
 }

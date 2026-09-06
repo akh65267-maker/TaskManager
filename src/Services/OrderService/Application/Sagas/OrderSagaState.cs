@@ -21,4 +21,5 @@ public class OrderSagaState : SagaStateMachineInstance
     public int TotalItems { get; set; }
     public int ResponseCount { get; set; }
     public bool HasFailure { get; set; }
+    public string? FailureReason { get; set; }
 }
