@@ -62,19 +62,25 @@ public class CheckoutSagaTests : IAsyncLifetime
     {
         await Task.WhenAll(_orderDb.StartAsync(), _inventoryDb.StartAsync(), _rabbitMq.StartAsync());
 
+        // RabbitMQ's TCP port accepts connections slightly before its internal
+        // auth backend has fully initialized (worse on the non-alpine image,
+        // which has more to load) - an immediate connection attempt can get a
+        // spurious ACCESS_REFUSED. A short grace period avoids that race.
+        await Task.Delay(TimeSpan.FromSeconds(5));
+
         var rabbitUri = new Uri(_rabbitMq.GetConnectionString());
 
         _orderFactory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            builder.ConfigureAppConfiguration((_, cfg) =>
-            {
-                cfg.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["ConnectionStrings:OrderDatabase"] = _orderDb.GetConnectionString(),
-                    ["RabbitMq:Host"] = rabbitUri.Host,
-                    ["RabbitMq:Port"] = rabbitUri.Port.ToString(),
-                });
-            });
+            // UseSetting (not ConfigureAppConfiguration+AddInMemoryCollection):
+            // Program.cs reads builder.Configuration.GetConnectionString(...)
+            // immediately after WebApplication.CreateBuilder(args), before a
+            // later-added ConfigureAppConfiguration source is guaranteed to be
+            // layered in yet. UseSetting writes directly into the same
+            // configuration WebApplicationFactory hands to CreateBuilder.
+            builder.UseSetting("ConnectionStrings:OrderDatabase", _orderDb.GetConnectionString());
+            builder.UseSetting("RabbitMq:Host", rabbitUri.Host);
+            builder.UseSetting("RabbitMq:Port", rabbitUri.Port.ToString());
         });
         _orderClient = _orderFactory.CreateClient();
 
