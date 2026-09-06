@@ -22,6 +22,7 @@
     <Project Path="tests/CatalogService.UnitTests/CatalogService.UnitTests.csproj" />
     <Project Path="tests/InventoryService.UnitTests/InventoryService.UnitTests.csproj" />
     <Project Path="tests/OrderService.UnitTests/OrderService.UnitTests.csproj" />
+    <Project Path="tests/Saga.IntegrationTests/Saga.IntegrationTests.csproj" />
     <Project Path="tests/TaskService.UnitTests/TaskService.UnitTests.csproj" />
     <Project Path="tests/UserService.UnitTests/UserService.UnitTests.csproj" />
   </Folder>
