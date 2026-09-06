@@ -74,6 +74,15 @@ builder.Services.AddMassTransit(x =>
             h.Password(builder.Configuration["RabbitMq:Password"] ?? "guest");
         });
 
+        // StockReserved and StockReservationFailed for the same order can
+        // arrive nearly simultaneously (concurrent ReserveStock calls), and
+        // both try to lock/update the same saga row. Postgres correctly
+        // rejects one under serializable isolation (40001: could not
+        // serialize access due to concurrent update) - that's an expected,
+        // recoverable race, not a real failure, so retry a few times rather
+        // than faulting the message.
+        cfg.UseMessageRetry(r => r.Intervals(100, 250, 500, 1000));
+
         cfg.ConfigureEndpoints(context);
     });
 });
