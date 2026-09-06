@@ -47,9 +47,12 @@ public class CheckoutSagaTests : IAsyncLifetime
     private const string JwtIssuer = "TaskManager";
     private const string JwtAudience = "TaskManager";
 
-    private readonly PostgreSqlContainer _orderDb = new PostgreSqlBuilder().WithImage("postgres:17-alpine").Build();
-    private readonly PostgreSqlContainer _inventoryDb = new PostgreSqlBuilder().WithImage("postgres:17-alpine").Build();
-    private readonly RabbitMqContainer _rabbitMq = new RabbitMqBuilder().WithImage("rabbitmq:3-management-alpine").Build();
+    // Using the same image tags as docker-compose.yml (postgres:17, rabbitmq:3-management)
+    // rather than -alpine variants: the alpine RabbitMQ tag hit an "exec format error"
+    // (architecture mismatch) on this machine, while these tags are already proven to work.
+    private readonly PostgreSqlContainer _orderDb = new PostgreSqlBuilder().WithImage("postgres:17").Build();
+    private readonly PostgreSqlContainer _inventoryDb = new PostgreSqlBuilder().WithImage("postgres:17").Build();
+    private readonly RabbitMqContainer _rabbitMq = new RabbitMqBuilder().WithImage("rabbitmq:3-management").Build();
 
     private WebApplicationFactory<Program>? _orderFactory;
     private IHost? _inventoryHost;
