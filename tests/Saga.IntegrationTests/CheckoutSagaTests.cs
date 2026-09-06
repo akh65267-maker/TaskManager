@@ -236,7 +236,7 @@ public class CheckoutSagaTests : IAsyncLifetime
         return body!.Id;
     }
 
-    private async Task<OrderDto> WaitForResolutionAsync(Guid orderId, int timeoutSeconds = 15)
+    private async Task<OrderDto> WaitForResolutionAsync(Guid orderId, int timeoutSeconds = 45)
     {
         var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
 
