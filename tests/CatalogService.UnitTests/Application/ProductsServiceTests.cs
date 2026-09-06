@@ -1,4 +1,3 @@
-using CatalogService.Application;
 using CatalogService.Application.Products;
 using CatalogService.Domain;
 using Microsoft.Extensions.Logging;
@@ -9,26 +8,24 @@ namespace CatalogService.UnitTests.Application;
 public class ProductsServiceTests
 {
     private readonly Mock<IProductRepository> _repo = new();
-    private readonly ProductsService _sut;
-
-    public ProductsServiceTests()
-    {
-        _sut = new ProductsService(_repo.Object, Mock.Of<ILogger<ProductsService>>());
-    }
 
     [Fact]
-    public async Task CreateAsync_WithInvalidName_ThrowsWithoutAdding()
+    public async Task CreateProductCommand_WithInvalidName_ThrowsWithoutAdding()
     {
+        var sut = new CreateProductCommandHandler(_repo.Object, Mock.Of<ILogger<CreateProductCommandHandler>>());
+
         await Assert.ThrowsAsync<ArgumentException>(
-            () => _sut.CreateAsync(new CreateProductRequest("", "desc", 9.99m)));
+            () => sut.Handle(new CreateProductCommand("", "desc", 9.99m), CancellationToken.None));
 
         _repo.Verify(x => x.AddAsync(It.IsAny<Product>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task CreateAsync_WithValidRequest_AddsAndSavesAndReturnsId()
+    public async Task CreateProductCommand_WithValidRequest_AddsAndSavesAndReturnsId()
     {
-        var id = await _sut.CreateAsync(new CreateProductRequest("Widget", "desc", 9.99m));
+        var sut = new CreateProductCommandHandler(_repo.Object, Mock.Of<ILogger<CreateProductCommandHandler>>());
+
+        var id = await sut.Handle(new CreateProductCommand("Widget", "desc", 9.99m), CancellationToken.None);
 
         Assert.NotEqual(Guid.Empty, id);
         _repo.Verify(x => x.AddAsync(
@@ -38,12 +35,14 @@ public class ProductsServiceTests
     }
 
     [Fact]
-    public async Task GetByIdAsync_NotFound_ReturnsNull()
+    public async Task GetProductByIdQuery_NotFound_ReturnsNull()
     {
         _repo.Setup(x => x.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Product?)null);
 
-        var result = await _sut.GetByIdAsync(Guid.NewGuid());
+        var sut = new GetProductByIdQueryHandler(_repo.Object);
+
+        var result = await sut.Handle(new GetProductByIdQuery(Guid.NewGuid()), CancellationToken.None);
 
         Assert.Null(result);
     }

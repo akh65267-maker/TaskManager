@@ -1,9 +1,9 @@
 using System.Text;
 using CatalogService;
-using CatalogService.Application;
 using CatalogService.Application.Products;
 using CatalogService.Domain;
 using CatalogService.Infrastructure.Persistence;
+using MediatR;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -21,7 +21,7 @@ builder.Services.AddHealthChecks()
     .AddDbContextCheck<CatalogDbContext>();
 
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
-builder.Services.AddScoped<ProductsService>();
+builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<Program>());
 
 var jwtKey = builder.Configuration["Jwt:Key"]
     ?? throw new InvalidOperationException("Jwt:Key configuration is missing.");
@@ -65,30 +65,30 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/products", async (
-    ProductsService service,
+    IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    var products = await service.GetAllAsync(cancellationToken);
+    var products = await mediator.Send(new GetAllProductsQuery(), cancellationToken);
 
     return Results.Ok(products);
 }).RequireAuthorization();
 
 app.MapGet("/products/{id:guid}", async (
     Guid id,
-    ProductsService service,
+    IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    var product = await service.GetByIdAsync(id, cancellationToken);
+    var product = await mediator.Send(new GetProductByIdQuery(id), cancellationToken);
 
     return product is null ? Results.NotFound() : Results.Ok(product);
 }).RequireAuthorization();
 
 app.MapPost("/products", async (
     CreateProductRequest request,
-    ProductsService service,
+    IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    var id = await service.CreateAsync(request, cancellationToken);
+    var id = await mediator.Send(new CreateProductCommand(request.Name, request.Description, request.Price), cancellationToken);
 
     return Results.Created($"/products/{id}", new { id });
 }).RequireAuthorization();
