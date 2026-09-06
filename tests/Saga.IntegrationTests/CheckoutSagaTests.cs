@@ -79,6 +79,25 @@ public class CheckoutSagaTests : IAsyncLifetime
         var rabbitUsername = Uri.UnescapeDataString(rabbitUserInfo[0]);
         var rabbitPassword = Uri.UnescapeDataString(rabbitUserInfo[1]);
 
+        // Migrate via a standalone DbContext, built directly from a connection
+        // string rather than resolved from _orderFactory.Services. Touching
+        // WebApplicationFactory's service provider at all (including just for
+        // a migration scope) starts the whole ASP.NET host and its background
+        // services - the MassTransit bus and its outbox-delivery poller start
+        // immediately and can hit "relation OutboxState does not exist" before
+        // migrations (which would otherwise run right after) ever get a
+        // chance to create it. This was a real, reproducible bug, not just a
+        // slow environment: one hosted service's outbox poll would fail on
+        // its very first tick and never successfully deliver that order's
+        // OrderSubmitted event afterward.
+        var orderDbOptions = new DbContextOptionsBuilder<OrderDbContext>()
+            .UseNpgsql(_orderDb.GetConnectionString())
+            .Options;
+        await using (var migrationContext = new OrderDbContext(orderDbOptions))
+        {
+            await migrationContext.Database.MigrateAsync();
+        }
+
         _orderFactory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             // UseSetting (not ConfigureAppConfiguration+AddInMemoryCollection):
@@ -94,11 +113,6 @@ public class CheckoutSagaTests : IAsyncLifetime
             builder.UseSetting("RabbitMq:Password", rabbitPassword);
         });
         _orderClient = _orderFactory.CreateClient();
-
-        using (var scope = _orderFactory.Services.CreateScope())
-        {
-            await scope.ServiceProvider.GetRequiredService<OrderDbContext>().Database.MigrateAsync();
-        }
 
         _inventoryHost = Host.CreateDefaultBuilder()
             .ConfigureServices(services =>
