@@ -6,12 +6,14 @@ public class Product
     public string Name { get; private set; }
     public string Description { get; private set; }
     public decimal Price { get; private set; }
+    public string Category { get; private set; }
+    public DateTimeOffset CreatedAtUtc { get; private set; }
 
     private Product()
     {
     }
 
-    public Product(string name, string description, decimal price)
+    public Product(string name, string description, decimal price, string category)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Product name is required.", nameof(name));
@@ -19,9 +21,14 @@ public class Product
         if (price < 0)
             throw new ArgumentException("Price cannot be negative.", nameof(price));
 
+        if (string.IsNullOrWhiteSpace(category))
+            throw new ArgumentException("Product category is required.", nameof(category));
+
         Id = Guid.NewGuid();
         Name = name;
         Description = description ?? string.Empty;
         Price = price;
+        Category = category;
+        CreatedAtUtc = DateTimeOffset.UtcNow;
     }
 }

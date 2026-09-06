@@ -65,13 +65,34 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/products", async (
+    HttpRequest httpRequest,
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    var products = await mediator.Send(new GetAllProductsQuery(), cancellationToken);
+    var query = httpRequest.Query;
 
-    return Results.Ok(products);
-}).RequireAuthorization();
+    var sort = query["sort"].ToString() switch
+    {
+        "price-asc" => ProductSortBy.PriceAscending,
+        "price-desc" => ProductSortBy.PriceDescending,
+        "name" => ProductSortBy.NameAscending,
+        _ => ProductSortBy.Newest,
+    };
+
+    var page = int.TryParse(query["page"], out var p) && p > 0 ? p : 1;
+    var pageSize = int.TryParse(query["pageSize"], out var ps) && ps is > 0 and <= 100 ? ps : 20;
+
+    var result = await mediator.Send(new ProductListQuery(
+        Category: query["category"].ToString() is { Length: > 0 } category ? category : null,
+        MinPrice: decimal.TryParse(query["minPrice"], out var minPrice) ? minPrice : null,
+        MaxPrice: decimal.TryParse(query["maxPrice"], out var maxPrice) ? maxPrice : null,
+        Search: query["search"].ToString() is { Length: > 0 } search ? search : null,
+        Sort: sort,
+        Page: page,
+        PageSize: pageSize), cancellationToken);
+
+    return Results.Ok(result);
+});
 
 app.MapGet("/products/{id:guid}", async (
     Guid id,
@@ -81,14 +102,14 @@ app.MapGet("/products/{id:guid}", async (
     var product = await mediator.Send(new GetProductByIdQuery(id), cancellationToken);
 
     return product is null ? Results.NotFound() : Results.Ok(product);
-}).RequireAuthorization();
+});
 
 app.MapPost("/products", async (
     CreateProductRequest request,
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    var id = await mediator.Send(new CreateProductCommand(request.Name, request.Description, request.Price), cancellationToken);
+    var id = await mediator.Send(new CreateProductCommand(request.Name, request.Description, request.Price, request.Category), cancellationToken);
 
     return Results.Created($"/products/{id}", new { id });
 }).RequireAuthorization();

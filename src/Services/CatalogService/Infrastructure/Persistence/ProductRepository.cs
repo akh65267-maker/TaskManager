@@ -25,6 +25,48 @@ public class ProductRepository : IProductRepository
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     }
 
+    public async Task<(IReadOnlyCollection<Product> Items, int TotalCount)> SearchAsync(
+        string? category,
+        decimal? minPrice,
+        decimal? maxPrice,
+        string? search,
+        ProductSortBy sort,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _db.Products.AsNoTracking().AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(category))
+            query = query.Where(x => x.Category == category);
+
+        if (minPrice.HasValue)
+            query = query.Where(x => x.Price >= minPrice.Value);
+
+        if (maxPrice.HasValue)
+            query = query.Where(x => x.Price <= maxPrice.Value);
+
+        if (!string.IsNullOrWhiteSpace(search))
+            query = query.Where(x => EF.Functions.ILike(x.Name, $"%{search}%"));
+
+        query = sort switch
+        {
+            ProductSortBy.PriceAscending => query.OrderBy(x => x.Price),
+            ProductSortBy.PriceDescending => query.OrderByDescending(x => x.Price),
+            ProductSortBy.NameAscending => query.OrderBy(x => x.Name),
+            _ => query.OrderByDescending(x => x.CreatedAtUtc),
+        };
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return (items, totalCount);
+    }
+
     public async Task AddAsync(Product product, CancellationToken cancellationToken = default)
     {
         await _db.Products.AddAsync(product, cancellationToken);

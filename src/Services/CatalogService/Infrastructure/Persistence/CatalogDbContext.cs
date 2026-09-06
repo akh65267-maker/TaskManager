@@ -28,6 +28,15 @@ public class CatalogDbContext : DbContext
             entity.Property(x => x.Price)
                 .IsRequired()
                 .HasPrecision(18, 2);
+
+            entity.Property(x => x.Category)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(x => x.CreatedAtUtc)
+                .IsRequired();
+
+            entity.HasIndex(x => x.Category);
         });
     }
 }
