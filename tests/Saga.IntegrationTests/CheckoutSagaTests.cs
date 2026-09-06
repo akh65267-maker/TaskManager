@@ -70,6 +70,15 @@ public class CheckoutSagaTests : IAsyncLifetime
 
         var rabbitUri = new Uri(_rabbitMq.GetConnectionString());
 
+        // Testcontainers.RabbitMq generates its own username/password rather
+        // than using "guest"/"guest" - read the real credentials back out of
+        // the connection string instead of hardcoding a default that doesn't
+        // match, which otherwise causes a persistent (not transient)
+        // ACCESS_REFUSED no matter how long you wait for the container.
+        var rabbitUserInfo = rabbitUri.UserInfo.Split(':', 2);
+        var rabbitUsername = Uri.UnescapeDataString(rabbitUserInfo[0]);
+        var rabbitPassword = Uri.UnescapeDataString(rabbitUserInfo[1]);
+
         _orderFactory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             // UseSetting (not ConfigureAppConfiguration+AddInMemoryCollection):
@@ -81,6 +90,8 @@ public class CheckoutSagaTests : IAsyncLifetime
             builder.UseSetting("ConnectionStrings:OrderDatabase", _orderDb.GetConnectionString());
             builder.UseSetting("RabbitMq:Host", rabbitUri.Host);
             builder.UseSetting("RabbitMq:Port", rabbitUri.Port.ToString());
+            builder.UseSetting("RabbitMq:Username", rabbitUsername);
+            builder.UseSetting("RabbitMq:Password", rabbitPassword);
         });
         _orderClient = _orderFactory.CreateClient();
 
@@ -105,8 +116,8 @@ public class CheckoutSagaTests : IAsyncLifetime
                     {
                         cfg.Host(rabbitUri.Host, (ushort)rabbitUri.Port, "/", h =>
                         {
-                            h.Username("guest");
-                            h.Password("guest");
+                            h.Username(rabbitUsername);
+                            h.Password(rabbitPassword);
                         });
 
                         cfg.ReceiveEndpoint("ReserveStock", e =>
