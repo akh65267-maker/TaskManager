@@ -2,3 +2,7 @@ bin/
 obj/
 .vs/
 *.user
+
+# Real secrets for local docker-compose runs - never commit this.
+# Copy deploy/.env.example to deploy/.env and fill in real values.
+deploy/.env

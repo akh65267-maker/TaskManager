@@ -31,13 +31,13 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__TaskDatabase: Host=postgres;Port=5432;Database=taskflow;Username=postgres;Password=postgres
+      ConnectionStrings__TaskDatabase: Host=postgres;Port=5432;Database=taskflow;Username=postgres;Password=${POSTGRES_PASSWORD}
       RabbitMq__Host: rabbitmq
-      RabbitMq__Username: guest
-      RabbitMq__Password: guest
-      Jwt__Key: dev-only-insecure-signing-key-change-me-32bytes
-      Jwt__Issuer: TaskManager
-      Jwt__Audience: TaskManager
+      RabbitMq__Username: ${RABBITMQ_USER}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD}
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: ${JWT_ISSUER}
+      Jwt__Audience: ${JWT_AUDIENCE}
     ports:
       - "8080:8080"
     depends_on:
@@ -54,13 +54,16 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__UserDatabase: Host=postgres-users;Port=5432;Database=userflow;Username=postgres;Password=postgres
+      ConnectionStrings__UserDatabase: Host=postgres-users;Port=5432;Database=userflow;Username=postgres;Password=${POSTGRES_PASSWORD}
       RabbitMq__Host: rabbitmq
-      RabbitMq__Username: guest
-      RabbitMq__Password: guest
-      Jwt__Key: dev-only-insecure-signing-key-change-me-32bytes
-      Jwt__Issuer: TaskManager
-      Jwt__Audience: TaskManager
+      RabbitMq__Username: ${RABBITMQ_USER}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD}
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: ${JWT_ISSUER}
+      Jwt__Audience: ${JWT_AUDIENCE}
+      Admin__Email: ${ADMIN_EMAIL}
+      Admin__Password: ${ADMIN_PASSWORD}
+      Admin__DisplayName: ${ADMIN_DISPLAY_NAME}
     ports:
       - "8081:8080"
     depends_on:
@@ -77,10 +80,10 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__CatalogDatabase: Host=postgres-catalog;Port=5432;Database=catalogflow;Username=postgres;Password=postgres
-      Jwt__Key: dev-only-insecure-signing-key-change-me-32bytes
-      Jwt__Issuer: TaskManager
-      Jwt__Audience: TaskManager
+      ConnectionStrings__CatalogDatabase: Host=postgres-catalog;Port=5432;Database=catalogflow;Username=postgres;Password=${POSTGRES_PASSWORD}
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: ${JWT_ISSUER}
+      Jwt__Audience: ${JWT_AUDIENCE}
     ports:
       - "8082:8080"
     depends_on:
@@ -95,13 +98,13 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__InventoryDatabase: Host=postgres-inventory;Port=5432;Database=inventoryflow;Username=postgres;Password=postgres
+      ConnectionStrings__InventoryDatabase: Host=postgres-inventory;Port=5432;Database=inventoryflow;Username=postgres;Password=${POSTGRES_PASSWORD}
       RabbitMq__Host: rabbitmq
-      RabbitMq__Username: guest
-      RabbitMq__Password: guest
-      Jwt__Key: dev-only-insecure-signing-key-change-me-32bytes
-      Jwt__Issuer: TaskManager
-      Jwt__Audience: TaskManager
+      RabbitMq__Username: ${RABBITMQ_USER}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD}
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: ${JWT_ISSUER}
+      Jwt__Audience: ${JWT_AUDIENCE}
     ports:
       - "8083:8080"
     depends_on:
@@ -119,9 +122,9 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Redis: redis:6379
-      Jwt__Key: dev-only-insecure-signing-key-change-me-32bytes
-      Jwt__Issuer: TaskManager
-      Jwt__Audience: TaskManager
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: ${JWT_ISSUER}
+      Jwt__Audience: ${JWT_AUDIENCE}
     ports:
       - "8084:8080"
     depends_on:
@@ -136,13 +139,13 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__OrderDatabase: Host=postgres-order;Port=5432;Database=orderflow;Username=postgres;Password=postgres
+      ConnectionStrings__OrderDatabase: Host=postgres-order;Port=5432;Database=orderflow;Username=postgres;Password=${POSTGRES_PASSWORD}
       RabbitMq__Host: rabbitmq
-      RabbitMq__Username: guest
-      RabbitMq__Password: guest
-      Jwt__Key: dev-only-insecure-signing-key-change-me-32bytes
-      Jwt__Issuer: TaskManager
-      Jwt__Audience: TaskManager
+      RabbitMq__Username: ${RABBITMQ_USER}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD}
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: ${JWT_ISSUER}
+      Jwt__Audience: ${JWT_AUDIENCE}
     ports:
       - "8085:8080"
     depends_on:
@@ -157,7 +160,7 @@ services:
     environment:
       POSTGRES_DB: taskflow
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -174,7 +177,7 @@ services:
     environment:
       POSTGRES_DB: userflow
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5433:5432"
     volumes:
@@ -191,7 +194,7 @@ services:
     environment:
       POSTGRES_DB: catalogflow
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5434:5432"
     volumes:
@@ -208,7 +211,7 @@ services:
     environment:
       POSTGRES_DB: inventoryflow
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5435:5432"
     volumes:
@@ -225,7 +228,7 @@ services:
     environment:
       POSTGRES_DB: orderflow
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5436:5432"
     volumes:
@@ -239,6 +242,9 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     container_name: taskflow-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
     ports:
       - "5672:5672"
       - "15672:15672"
