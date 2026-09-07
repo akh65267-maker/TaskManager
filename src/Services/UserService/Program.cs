@@ -80,6 +80,30 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+// Seeds one admin account from configuration if it doesn't exist yet.
+// There's no invite/promote-user flow, so this is the only way an Admin
+// account comes to exist. The default password below is a dev-only
+// placeholder - production deployments must override Admin:Password via
+// a real secret, not commit a real password to appsettings.json.
+using (var scope = app.Services.CreateScope())
+{
+    var userRepo = scope.ServiceProvider.GetRequiredService<IUserRepository>();
+    var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+
+    var adminEmail = app.Configuration["Admin:Email"];
+    var adminPassword = app.Configuration["Admin:Password"];
+    var adminDisplayName = app.Configuration["Admin:DisplayName"] ?? "Admin";
+
+    if (!string.IsNullOrWhiteSpace(adminEmail)
+        && !string.IsNullOrWhiteSpace(adminPassword)
+        && !await userRepo.EmailExistsAsync(adminEmail))
+    {
+        var admin = new User(adminEmail, adminDisplayName, passwordHasher.Hash(adminPassword), UserRole.Admin);
+        await userRepo.AddAsync(admin);
+        await userRepo.SaveChangesAsync();
+    }
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();

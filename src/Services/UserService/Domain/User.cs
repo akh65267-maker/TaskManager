@@ -6,12 +6,13 @@ public class User
     public string Email { get; private set; }
     public string DisplayName { get; private set; }
     public string PasswordHash { get; private set; }
+    public UserRole Role { get; private set; }
 
     private User()
     {
     }
 
-    public User(string email, string displayName, string passwordHash)
+    public User(string email, string displayName, string passwordHash, UserRole role = UserRole.Customer)
     {
         if (string.IsNullOrWhiteSpace(email))
             throw new ArgumentException("Email is required.", nameof(email));
@@ -26,5 +27,6 @@ public class User
         Email = email;
         DisplayName = displayName;
         PasswordHash = passwordHash;
+        Role = role;
     }
 }

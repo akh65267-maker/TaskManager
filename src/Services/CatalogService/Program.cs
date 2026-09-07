@@ -112,7 +112,7 @@ app.MapPost("/products", async (
     var id = await mediator.Send(new CreateProductCommand(request.Name, request.Description, request.Price, request.Category), cancellationToken);
 
     return Results.Created($"/products/{id}", new { id });
-}).RequireAuthorization();
+}).RequireAuthorization(policy => policy.RequireRole("Admin"));
 
 app.UseExceptionHandler();
 

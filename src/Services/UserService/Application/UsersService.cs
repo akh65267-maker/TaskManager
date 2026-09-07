@@ -31,14 +31,14 @@ public class UsersService
     {
         var users = await _repo.GetAllAsync(cancellationToken);
 
-        return users.Select(user => new UserDto(user.Id, user.Email, user.DisplayName)).ToList();
+        return users.Select(user => new UserDto(user.Id, user.Email, user.DisplayName, user.Role)).ToList();
     }
 
     public async Task<UserDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var user = await _repo.GetByIdAsync(id, cancellationToken);
 
-        return user is null ? null : new UserDto(user.Id, user.Email, user.DisplayName);
+        return user is null ? null : new UserDto(user.Id, user.Email, user.DisplayName, user.Role);
     }
 
     public async Task<Guid> RegisterAsync(RegisterUserRequest request, CancellationToken cancellationToken = default)

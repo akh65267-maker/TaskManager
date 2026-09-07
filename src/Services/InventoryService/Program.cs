@@ -146,7 +146,7 @@ app.MapPost("/inventory", async (
     await service.CreateAsync(request, cancellationToken);
 
     return Results.Created($"/inventory/{request.ProductId}", new { productId = request.ProductId });
-}).RequireAuthorization();
+}).RequireAuthorization(policy => policy.RequireRole("Admin"));
 
 app.MapPost("/inventory/{productId:guid}/restock", async (
     Guid productId,
@@ -157,7 +157,7 @@ app.MapPost("/inventory/{productId:guid}/restock", async (
     var item = await service.RestockAsync(productId, request.Quantity, cancellationToken);
 
     return item is null ? Results.NotFound() : Results.Ok(item);
-}).RequireAuthorization();
+}).RequireAuthorization(policy => policy.RequireRole("Admin"));
 
 app.UseExceptionHandler();
 

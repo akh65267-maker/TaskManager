@@ -27,6 +27,11 @@ public class UserDbContext : DbContext
             entity.Property(x => x.DisplayName)
                 .IsRequired()
                 .HasMaxLength(200);
+
+            entity.Property(x => x.Role)
+                .IsRequired()
+                .HasConversion<string>()
+                .HasMaxLength(20);
         });
 
         modelBuilder.AddOutboxMessageEntity();

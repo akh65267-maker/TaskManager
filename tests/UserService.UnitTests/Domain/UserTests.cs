@@ -25,5 +25,14 @@ public class UserTests
         Assert.Equal("test@example.com", user.Email);
         Assert.Equal("Test User", user.DisplayName);
         Assert.Equal("hash", user.PasswordHash);
+        Assert.Equal(UserRole.Customer, user.Role);
+    }
+
+    [Fact]
+    public void Constructor_WithExplicitRole_SetsRole()
+    {
+        var user = new User("admin@example.com", "Admin", "hash", UserRole.Admin);
+
+        Assert.Equal(UserRole.Admin, user.Role);
     }
 }
