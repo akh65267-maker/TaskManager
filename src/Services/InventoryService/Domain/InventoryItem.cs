@@ -39,4 +39,12 @@ public class InventoryItem
 
         QuantityAvailable += quantity;
     }
+
+    public void Restock(int quantity)
+    {
+        if (quantity <= 0)
+            throw new ArgumentException("Quantity must be positive.", nameof(quantity));
+
+        QuantityAvailable += quantity;
+    }
 }

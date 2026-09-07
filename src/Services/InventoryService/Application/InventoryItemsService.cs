@@ -43,4 +43,22 @@ public class InventoryItemsService
             item.ProductId,
             item.QuantityAvailable);
     }
+
+    public async Task<InventoryItemDto?> RestockAsync(Guid productId, int quantity, CancellationToken cancellationToken = default)
+    {
+        var item = await _repo.GetByProductIdAsync(productId, cancellationToken);
+        if (item is null)
+            return null;
+
+        item.Restock(quantity);
+        await _repo.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Restocked product {ProductId} by {Quantity}, now {NewQuantity}",
+            item.ProductId,
+            quantity,
+            item.QuantityAvailable);
+
+        return new InventoryItemDto(item.ProductId, item.QuantityAvailable);
+    }
 }

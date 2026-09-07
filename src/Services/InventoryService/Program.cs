@@ -148,6 +148,17 @@ app.MapPost("/inventory", async (
     return Results.Created($"/inventory/{request.ProductId}", new { productId = request.ProductId });
 }).RequireAuthorization();
 
+app.MapPost("/inventory/{productId:guid}/restock", async (
+    Guid productId,
+    RestockRequest request,
+    InventoryItemsService service,
+    CancellationToken cancellationToken) =>
+{
+    var item = await service.RestockAsync(productId, request.Quantity, cancellationToken);
+
+    return item is null ? Results.NotFound() : Results.Ok(item);
+}).RequireAuthorization();
+
 app.UseExceptionHandler();
 
 app.MapHealthChecks("/health");

@@ -52,4 +52,31 @@ public class InventoryItemsServiceTests
 
         Assert.Null(result);
     }
+
+    [Fact]
+    public async Task RestockAsync_UnknownProductId_ReturnsNullWithoutSaving()
+    {
+        _repo.Setup(x => x.GetByProductIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InventoryItem?)null);
+
+        var result = await _sut.RestockAsync(Guid.NewGuid(), 10);
+
+        Assert.Null(result);
+        _repo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RestockAsync_KnownProductId_IncreasesQuantityAndSaves()
+    {
+        var productId = Guid.NewGuid();
+        var item = new InventoryItem(productId, 5);
+        _repo.Setup(x => x.GetByProductIdAsync(productId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(item);
+
+        var result = await _sut.RestockAsync(productId, 10);
+
+        Assert.NotNull(result);
+        Assert.Equal(15, result!.QuantityAvailable);
+        _repo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
 }

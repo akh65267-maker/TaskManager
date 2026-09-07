@@ -81,4 +81,22 @@ public class InventoryItemTests
 
         Assert.Throws<ArgumentException>(() => item.Release(0));
     }
+
+    [Fact]
+    public void Restock_IncreasesQuantityAvailable()
+    {
+        var item = new InventoryItem(Guid.NewGuid(), 10);
+
+        item.Restock(15);
+
+        Assert.Equal(25, item.QuantityAvailable);
+    }
+
+    [Fact]
+    public void Restock_WithNonPositiveQuantity_Throws()
+    {
+        var item = new InventoryItem(Guid.NewGuid(), 10);
+
+        Assert.Throws<ArgumentException>(() => item.Restock(0));
+    }
 }
