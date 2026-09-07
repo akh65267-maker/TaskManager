@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore TaskManager.slnx
+
+      - name: Build
+        run: dotnet build TaskManager.slnx --no-restore --configuration Release
+
+      # Run each unit test project explicitly rather than testing the whole
+      # solution: Saga.IntegrationTests needs Testcontainers/Docker and has
+      # shown timing-sensitive flakiness locally, so it's excluded here and
+      # left for a separate, dedicated integration-test workflow later.
+      - name: Unit tests - BasketService
+        run: dotnet test tests/BasketService.UnitTests --no-restore --configuration Release
+
+      - name: Unit tests - CatalogService
+        run: dotnet test tests/CatalogService.UnitTests --no-restore --configuration Release
+
+      - name: Unit tests - InventoryService
+        run: dotnet test tests/InventoryService.UnitTests --no-restore --configuration Release
+
+      - name: Unit tests - OrderService
+        run: dotnet test tests/OrderService.UnitTests --no-restore --configuration Release
+
+      - name: Unit tests - TaskService
+        run: dotnet test tests/TaskService.UnitTests --no-restore --configuration Release
+
+      - name: Unit tests - UserService
+        run: dotnet test tests/UserService.UnitTests --no-restore --configuration Release
