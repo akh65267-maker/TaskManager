@@ -7,6 +7,9 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Collections.Concurrent;
+using Contracts.Commands;
+using Contracts.IntegrationEvents;
 using MassTransit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -128,6 +131,7 @@ public class CheckoutSagaTests : IAsyncLifetime
                     x.AddEntityFrameworkOutbox<InventoryDbContext>(o => o.UsePostgres());
                     x.AddConsumer<ReserveStockConsumer>();
                     x.AddConsumer<ReleaseStockConsumer>();
+                    x.AddConsumer<FaultRecorder>();
 
                     x.UsingRabbitMq((context, cfg) =>
                     {
@@ -147,6 +151,18 @@ public class CheckoutSagaTests : IAsyncLifetime
                         {
                             e.UseEntityFrameworkOutbox<InventoryDbContext>(context);
                             e.ConfigureConsumer<ReleaseStockConsumer>(context);
+                        });
+
+                        // Test-only. When a message exhausts UseMessageRetry,
+                        // MassTransit parks it in an _error queue and publishes
+                        // a Fault<T>. Nothing in this system consumes either
+                        // (see docs/TODO.md), so such a failure is completely
+                        // silent and the saga simply never progresses - which
+                        // surfaces only as a timeout with no cause. Binding the
+                        // fault exchanges here turns that into a readable error.
+                        cfg.ReceiveEndpoint("saga-test-fault-recorder", e =>
+                        {
+                            e.ConfigureConsumer<FaultRecorder>(context);
                         });
                     });
                 });
@@ -278,7 +294,68 @@ public class CheckoutSagaTests : IAsyncLifetime
             await Task.Delay(250);
         }
 
-        throw new TimeoutException($"Order {orderId} did not resolve out of Pending within {timeoutSeconds}s.");
+        throw new TimeoutException(
+            $"Order {orderId} did not resolve out of Pending within {timeoutSeconds}s. " +
+            await DescribeStalledStateAsync());
+    }
+
+    /// <summary>
+    /// Explains *where* a stalled checkout stopped, so a CI timeout is
+    /// actionable. Distinguishes the three possible stalls: the OrderSubmitted
+    /// event never left the outbox, the saga never started, or the saga started
+    /// but is still waiting on stock responses.
+    /// </summary>
+    private async Task<string> DescribeStalledStateAsync()
+    {
+        var faults = _faults.IsEmpty
+            ? "none"
+            : string.Join(" | ", _faults);
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<OrderDbContext>()
+                .UseNpgsql(_orderDb.GetConnectionString())
+                .Options;
+            await using var db = new OrderDbContext(options);
+
+            var outboxPending = await db.Database
+                .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"OutboxMessage\"")
+                .SingleAsync();
+            var sagaStates = await db.Database
+                .SqlQueryRaw<string>("SELECT coalesce(string_agg(\"CurrentState\", ','), '(no rows)') AS \"Value\" FROM \"OrderSagaStates\"")
+                .SingleAsync();
+
+            return $"OutboxMessage rows: {outboxPending}; saga states: {sagaStates}; faults: {faults}";
+        }
+        catch (Exception ex)
+        {
+            return $"faults: {faults}; (diagnostics query failed: {ex.Message})";
+        }
+    }
+
+    // Static so the recorder consumer (constructed by DI in the inventory host)
+    // can report back into the test that is currently running.
+    private static readonly ConcurrentBag<string> _faults = new();
+
+    private sealed class FaultRecorder :
+        IConsumer<Fault<OrderSubmitted>>,
+        IConsumer<Fault<ReserveStock>>,
+        IConsumer<Fault<ReleaseStock>>,
+        IConsumer<Fault<StockReserved>>,
+        IConsumer<Fault<StockReservationFailed>>
+    {
+        public Task Consume(ConsumeContext<Fault<OrderSubmitted>> context) => Record(context.Message);
+        public Task Consume(ConsumeContext<Fault<ReserveStock>> context) => Record(context.Message);
+        public Task Consume(ConsumeContext<Fault<ReleaseStock>> context) => Record(context.Message);
+        public Task Consume(ConsumeContext<Fault<StockReserved>> context) => Record(context.Message);
+        public Task Consume(ConsumeContext<Fault<StockReservationFailed>> context) => Record(context.Message);
+
+        private static Task Record<T>(Fault<T> fault) where T : class
+        {
+            var detail = fault.Exceptions.FirstOrDefault();
+            _faults.Add($"{typeof(T).Name} faulted: {detail?.ExceptionType}: {detail?.Message}");
+            return Task.CompletedTask;
+        }
     }
 
     private sealed record CreatedOrderResponse(Guid Id);
