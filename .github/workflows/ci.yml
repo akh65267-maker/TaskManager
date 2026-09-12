@@ -18,30 +18,91 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Restore
+      - name: Restore NuGet packages
         run: dotnet restore TaskManager.slnx
 
-      - name: Build
+      - name: Build (Release)
         run: dotnet build TaskManager.slnx --no-restore --configuration Release
 
-      # Run each unit test project explicitly rather than testing the whole
-      # solution: Saga.IntegrationTests needs Testcontainers/Docker and has
-      # shown timing-sensitive flakiness locally, so it's excluded here and
-      # left for a separate, dedicated integration-test workflow later.
-      - name: Unit tests - BasketService
-        run: dotnet test tests/BasketService.UnitTests --no-restore --configuration Release
+      # Run all six unit-test projects in a single invocation.
+      # Saga.IntegrationTests is excluded here because it needs Docker
+      # (Testcontainers) and runs in its own job below.
+      - name: Unit tests
+        run: >
+          dotnet test TaskManager.slnx
+          --no-restore
+          --configuration Release
+          --filter "FullyQualifiedName!~Saga.IntegrationTests"
+          --logger "console;verbosity=normal"
 
-      - name: Unit tests - CatalogService
-        run: dotnet test tests/CatalogService.UnitTests --no-restore --configuration Release
+  migration-drift:
+    runs-on: ubuntu-latest
+    # Runs in parallel with build-and-test; no dependency between them.
 
-      - name: Unit tests - InventoryService
-        run: dotnet test tests/InventoryService.UnitTests --no-restore --configuration Release
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Unit tests - OrderService
-        run: dotnet test tests/OrderService.UnitTests --no-restore --configuration Release
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
 
-      - name: Unit tests - TaskService
-        run: dotnet test tests/TaskService.UnitTests --no-restore --configuration Release
+      - name: Install EF Core tools
+        run: dotnet tool install --global dotnet-ef
 
-      - name: Unit tests - UserService
-        run: dotnet test tests/UserService.UnitTests --no-restore --configuration Release
+      - name: Restore NuGet packages
+        run: dotnet restore TaskManager.slnx
+
+      # Checks that every EF DbContext's current model matches the last
+      # committed migration. Fails if someone added or changed an entity
+      # without running 'dotnet ef migrations add'. Critical here because
+      # no service applies migrations at startup - a missed migration fails
+      # silently until the service hits the database.
+      - name: Check CatalogService migration drift
+        run: dotnet ef migrations has-pending-model-changes --project src/Services/CatalogService
+
+      - name: Check InventoryService migration drift
+        run: dotnet ef migrations has-pending-model-changes --project src/Services/InventoryService
+
+      - name: Check OrderService migration drift
+        run: dotnet ef migrations has-pending-model-changes --project src/Services/OrderService
+
+      - name: Check UserService migration drift
+        run: dotnet ef migrations has-pending-model-changes --project src/Services/UserService
+
+      # TaskService is excluded from normal analysis (see docs/README.md)
+      # but its migrations are checked here because a broken schema is an
+      # operational failure regardless of documentation scope.
+      - name: Check TaskService migration drift
+        run: dotnet ef migrations has-pending-model-changes --project src/Services/TaskService
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    # Runs in parallel with the other jobs. Slower than unit tests
+    # (~60-90 s) because Testcontainers pulls and starts real Postgres
+    # and RabbitMQ images. Kept separate so a flaky integration test
+    # doesn't block a fast unit-test pass from being reported.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore NuGet packages
+        run: dotnet restore TaskManager.slnx
+
+      - name: Build (Release)
+        run: dotnet build TaskManager.slnx --no-restore --configuration Release
+
+      # GitHub-hosted ubuntu-latest runners have Docker installed and the
+      # daemon running, so Testcontainers works without any extra setup.
+      - name: Integration tests (Saga)
+        run: >
+          dotnet test tests/Saga.IntegrationTests
+          --no-restore
+          --configuration Release
+          --logger "console;verbosity=normal"
+        timeout-minutes: 10

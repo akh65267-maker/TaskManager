@@ -50,8 +50,8 @@ No `IConsumeObserver`/fault consumer is registered, so a message that exhausts r
 **Confirmed — no service applies EF migrations at startup.**
 There is no `Database.Migrate()`/`EnsureCreated()` anywhere in `src/`. `docker compose up` produces empty databases and services that fail on first query; schema must be applied manually. This is the first thing to hit when bringing the stack up.
 
-**Confirmed — the saga integration test is not run by CI.**
-`.github/workflows/ci.yml` excludes `Saga.IntegrationTests` (Testcontainers + noted flakiness) and the promised dedicated workflow does not exist. The only automated coverage of the distributed workflow therefore runs only when someone runs it locally.
+**Resolved — the saga integration test now runs in CI.**
+`Saga.IntegrationTests` runs in a dedicated `integration-tests` job in `.github/workflows/ci.yml` on every push/PR to main. GitHub-hosted runners have Docker, so Testcontainers works without extra setup.
 
 **Confirmed — Redis has no persistence volume and baskets have no TTL.**
 Recreating the container discards all baskets; keys otherwise live forever. Fine if baskets are meant to be disposable, but that isn't stated anywhere.

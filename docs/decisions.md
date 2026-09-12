@@ -92,6 +92,6 @@ Evidence: `tracing.AddOtlpExporter()` with no endpoint argument; `OTEL_EXPORTER_
 Rationale (stated): so each environment configures its own collector independently.
 
 ---
-**Unit tests in CI; the saga integration test excluded.**
-Evidence: `.github/workflows/ci.yml` runs the six unit-test projects one by one.
-Rationale (stated in the workflow comment): `Saga.IntegrationTests` needs Testcontainers/Docker and showed timing-sensitive flakiness locally, deferred to a dedicated workflow that does not exist yet.
+**Three parallel CI jobs: unit tests, migration drift, integration tests.**
+Evidence: `.github/workflows/ci.yml` — `build-and-test` runs all unit tests in one `dotnet test` invocation (filter excludes the integration project); `migration-drift` runs `dotnet ef migrations has-pending-model-changes` on all five EF services; `integration-tests` runs `Saga.IntegrationTests` via Testcontainers (GitHub-hosted runners have Docker).
+Rationale: unit tests give fast feedback; migration drift catches the most common "works locally, broken in prod" failure mode given that no service applies migrations at startup; the integration test job is separate so a Testcontainers timing issue doesn't block a passing unit-test run from being reported.
