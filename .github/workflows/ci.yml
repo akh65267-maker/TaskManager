@@ -106,4 +106,4 @@ jobs:
           --no-restore
           --configuration Release
           --logger "console;verbosity=normal"
-        timeout-minutes: 10
+        timeout-minutes: 15

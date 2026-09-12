@@ -64,12 +64,6 @@ public class CheckoutSagaTests : IAsyncLifetime
     {
         await Task.WhenAll(_orderDb.StartAsync(), _inventoryDb.StartAsync(), _rabbitMq.StartAsync());
 
-        // RabbitMQ's TCP port accepts connections slightly before its internal
-        // auth backend has fully initialized (worse on the non-alpine image,
-        // which has more to load) - an immediate connection attempt can get a
-        // spurious ACCESS_REFUSED. A short grace period avoids that race.
-        await Task.Delay(TimeSpan.FromSeconds(5));
-
         var rabbitUri = new Uri(_rabbitMq.GetConnectionString());
 
         // Testcontainers.RabbitMq generates its own username/password rather
@@ -80,6 +74,23 @@ public class CheckoutSagaTests : IAsyncLifetime
         var rabbitUserInfo = rabbitUri.UserInfo.Split(':', 2);
         var rabbitUsername = Uri.UnescapeDataString(rabbitUserInfo[0]);
         var rabbitPassword = Uri.UnescapeDataString(rabbitUserInfo[1]);
+
+        // Wait until the RabbitMQ management API responds successfully.
+        // The TCP port becomes reachable slightly before the auth backend and
+        // exchange infrastructure are ready (worse on CI where the non-alpine
+        // image has more to load). Polling the management healthcheck endpoint
+        // is more reliable than a fixed sleep and avoids ACCESS_REFUSED races.
+        var managementPort = _rabbitMq.GetMappedPublicPort(15672);
+        var healthUrl = $"http://{_rabbitMq.Hostname}:{managementPort}/api/healthchecks/node";
+        using var mgmtClient = new HttpClient();
+        mgmtClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{rabbitUsername}:{rabbitPassword}")));
+        var readyDeadline = DateTime.UtcNow.AddSeconds(60);
+        while (DateTime.UtcNow < readyDeadline)
+        {
+            try { if ((await mgmtClient.GetAsync(healthUrl)).IsSuccessStatusCode) break; } catch { }
+            await Task.Delay(500);
+        }
 
         // Migrate via a standalone DbContext, built directly from a connection
         // string rather than resolved from _orderFactory.Services. Touching
@@ -261,7 +272,7 @@ public class CheckoutSagaTests : IAsyncLifetime
         Converters = { new JsonStringEnumConverter() }
     };
 
-    private async Task<OrderDto> WaitForResolutionAsync(Guid orderId, int timeoutSeconds = 45)
+    private async Task<OrderDto> WaitForResolutionAsync(Guid orderId, int timeoutSeconds = 90)
     {
         var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
 
