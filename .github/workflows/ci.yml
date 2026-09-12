@@ -47,11 +47,12 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Install EF Core tools
-        run: dotnet tool install --global dotnet-ef
-
-      - name: Restore NuGet packages
-        run: dotnet restore TaskManager.slnx
+      - name: Restore NuGet packages and local tools
+        # dotnet-ef is declared in .config/dotnet-tools.json; tool restore
+        # installs it locally so the 'dotnet ef' command works in subsequent steps.
+        run: |
+          dotnet restore TaskManager.slnx
+          dotnet tool restore
 
       # Checks that every EF DbContext's current model matches the last
       # committed migration. Fails if someone added or changed an entity

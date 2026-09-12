@@ -5,6 +5,8 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using MassTransit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -250,6 +252,15 @@ public class CheckoutSagaTests : IAsyncLifetime
         return body!.Id;
     }
 
+    // The service serializes OrderStatus as a string via JsonStringEnumConverter
+    // (configured in OrderService/Program.cs). ReadFromJsonAsync uses default
+    // options with no converter, so we must provide one here or the deserializer
+    // throws when it sees "Pending"/"Confirmed"/"Cancelled" instead of an integer.
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     private async Task<OrderDto> WaitForResolutionAsync(Guid orderId, int timeoutSeconds = 45)
     {
         var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
@@ -258,7 +269,7 @@ public class CheckoutSagaTests : IAsyncLifetime
         {
             var response = await _orderClient.GetAsync($"/orders/{orderId}");
             response.EnsureSuccessStatusCode();
-            var order = await response.Content.ReadFromJsonAsync<OrderDto>();
+            var order = await response.Content.ReadFromJsonAsync<OrderDto>(_jsonOptions);
 
             if (order!.Status != OrderStatus.Pending)
                 return order;
