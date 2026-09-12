@@ -11,6 +11,7 @@ using OrderService.Application;
 using OrderService.Application.Orders;
 using OrderService.Application.Sagas;
 using OrderService.Domain;
+using OrderService.Infrastructure.Observability;
 using OrderService.Infrastructure.Persistence;
 using Serilog;
 
@@ -39,6 +40,9 @@ builder.Services.AddHealthChecks()
 
 builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 builder.Services.AddScoped<OrdersService>();
+
+builder.Services.AddSingleton<OrderMetrics>();
+builder.Services.AddHostedService<OrderMetricsCollector>();
 
 var jwtKey = builder.Configuration["Jwt:Key"]
     ?? throw new InvalidOperationException("Jwt:Key configuration is missing.");

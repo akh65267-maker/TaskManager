@@ -67,6 +67,9 @@ public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
                     incomplete => incomplete),
 
             When(StockReservationFailedEvent)
+                .Then(context => context.GetPayload<IServiceProvider>()
+                    .GetRequiredService<OrderMetrics>()
+                    .RecordReservationFailure())
                 .Then(context => context.Saga.HasFailure = true)
                 .Then(context => context.Saga.FailureReason ??= context.Message.Reason)
                 .Then(context => context.Saga.ResponseCount++)
@@ -108,5 +111,7 @@ public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
         }
 
         await repo.SaveChangesAsync();
+
+        provider.GetRequiredService<OrderMetrics>().RecordFinalized(saga.HasFailure);
     }
 }

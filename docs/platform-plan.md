@@ -1,8 +1,10 @@
 # Platform & observability plan
 
-Evaluation of ten candidate technologies against what this repository actually has today. Nothing here is implemented yet — this document is the decision record for *whether* and *where* each one belongs.
+Evaluation of ten candidate technologies against what this repository actually has today. This document is the decision record for *whether* and *where* each one belongs.
 
-Current baseline, verified:
+**Status:** metrics, Prometheus, Grafana and the custom saga metrics (sections 1–4, phase 1) are **implemented** — see [observability.md](observability.md) for what actually shipped, which differs from the plan in two places: rate limiting was *not* included in phase 1, and Prometheus/Grafana start with the stack rather than sitting behind an `observability` profile (observability that must be opted into is observability nobody enables). Everything else below is still a proposal.
+
+Current baseline as it was *before* phase 1, verified at the time:
 
 - **Traces:** OpenTelemetry 1.18.0 with ASP.NET Core + HttpClient instrumentation, OTLP → Jaeger. `MassTransit` added as an activity source in the four bus services.
 - **Logs:** Serilog to console, enriched with `Service` + `TraceId`/`SpanId`.
@@ -153,12 +155,12 @@ Two things should be settled *before* any CD work, because they shape it:
 
 ## Suggested sequence
 
-| Phase | Work |
-|---|---|
-| 1 | `WithMetrics` + Prometheus exporter; Prometheus + Grafana in an `observability` compose profile; RED dashboard; login rate limiter; trace id in response headers and `ProblemDetails` |
-| 2 | Saga/outbox custom metrics + checkout dashboard; RabbitMQ Prometheus plugin with an `_error`-queue panel; pgAdmin + Redis Insight in a `tools` profile |
-| 3 | CI: single test step, integration-test job, migration-drift check, image build |
-| 4 | Refresh tokens + revocation — after the cookie-vs-storage decision is agreed with `taskmanager-web` |
-| 5 | Image publishing to GHCR. Revisit real CD once a deployment target exists |
+| Phase | Work | Status |
+|---|---|---|
+| 1 | `WithMetrics` + Prometheus exporter; Prometheus + Grafana; RED dashboard; saga/outbox metrics + checkout dashboard; RabbitMQ Prometheus plugin and `_error`-queue panel; alert rules | **Done** — phases 1 and 2's observability work landed together, since the saga metrics are the reason the dashboards are worth having |
+| 2 | Login rate limiter; trace id in response headers and `ProblemDetails`; pgAdmin + Redis Insight in a `tools` profile | Not started |
+| 3 | CI: single test step, integration-test job, migration-drift check, image build | Not started |
+| 4 | Refresh tokens + revocation — after the cookie-vs-storage decision is agreed with `taskmanager-web` | Blocked on that decision |
+| 5 | Image publishing to GHCR. Revisit real CD once a deployment target exists | Not started |
 
 Keep in view that the saga timeout and order-price validation in [TODO.md](TODO.md) sit above everything in this table on impact.

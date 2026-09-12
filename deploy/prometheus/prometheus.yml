@@ -1,0 +1,48 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # Each service exposes GET /metrics itself (OpenTelemetry's Prometheus
+  # exporter, wired up centrally in src/Shared/Observability). Targets use the
+  # compose network's internal port 8080, not the published host ports.
+  - job_name: services
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["gateway:8080"]
+        labels: { service: gateway }
+      - targets: ["users-api:8080"]
+        labels: { service: user-service }
+      - targets: ["catalog-api:8080"]
+        labels: { service: catalog-service }
+      - targets: ["inventory-api:8080"]
+        labels: { service: inventory-service }
+      - targets: ["basket-api:8080"]
+        labels: { service: basket-service }
+      - targets: ["order-api:8080"]
+        labels: { service: order-service }
+
+  # Requires the rabbitmq_prometheus plugin (enabled via
+  # deploy/rabbitmq/enabled_plugins). The queue depth of the *_error queues is
+  # the signal that messages have exhausted retry, which is exactly the
+  # condition that strands a checkout saga.
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+
+  # The default /metrics endpoint aggregates across queues, so per-queue depth
+  # needs the detailed endpoint. Requesting a single family keeps this cheap -
+  # /metrics/detailed with no filter returns everything RabbitMQ knows.
+  - job_name: rabbitmq-queues
+    metrics_path: /metrics/detailed
+    params:
+      family: ["queue_coarse_metrics"]
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

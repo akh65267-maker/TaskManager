@@ -1,0 +1,119 @@
+{
+  "uid": "taskmanager-checkout",
+  "title": "Checkout saga",
+  "tags": ["taskmanager"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Oldest Pending order (age)",
+      "description": "The saga has no timeout, so a lost message leaves an order Pending with its stock reserved forever. In healthy operation this stays near zero; a value in the minutes means a stranded checkout. This is the single most important number on this dashboard.",
+      "gridPos": { "h": 6, "w": 7, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "max(order_pending_oldest_age_seconds)" }],
+      "options": { "colorMode": "background", "graphMode": "area" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 60 },
+              { "color": "red", "value": 300 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Sagas in flight",
+      "description": "Persisted saga instances. Sustained non-zero with no checkout traffic means sagas are stuck rather than running.",
+      "gridPos": { "h": 6, "w": 5, "x": 7, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "max(order_saga_active)" }],
+      "options": { "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "type": "stat",
+      "title": "Parked messages (RabbitMQ *_error)",
+      "description": "Messages that exhausted UseMessageRetry. Nothing consumes these queues, so anything here needs a human.",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rabbitmq_detailed_queue_messages_ready{queue=~\".*_error\"})" }
+      ],
+      "options": { "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Outbox backlog",
+      "description": "Rows waiting to be delivered to RabbitMQ. Drains continuously in normal operation.",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "max(order_outbox_backlog)" }],
+      "options": { "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "type": "timeseries",
+      "title": "Saga outcomes (per minute)",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(order_saga_finalized_total[5m])) * 60",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Stock reservation failures (per minute)",
+      "description": "Unlabelled on purpose: the failure reason embeds requested/available quantities, which would create a time series per failure. The reason is on the trace and in the logs.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(order_stock_reservation_failed_total[5m])) * 60",
+          "legendFormat": "failures"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "POST /orders latency p95",
+      "description": "Only the synchronous part of checkout - POST /orders returns 201 while the saga is still running, so this does not measure time to a Confirmed order.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service=\"order-service\",http_route=\"/orders\",http_request_method=\"POST\"}[5m])))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    }
+  ]
+}

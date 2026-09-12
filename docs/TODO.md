@@ -28,6 +28,7 @@ A `jti` claim is minted but never persisted or checked, and there is no refresh 
 **Confirmed — the saga has no timeout, so a lost response strands the order permanently.**
 No MassTransit scheduler is configured and the state machine defines no `Schedule`/timeout event. If a `ReserveStock` or a stock response is never delivered (for example after exhausting retries into the `_error` queue), the saga stays in `AwaitingStockReservation` forever: the order remains `Pending` and any stock already reserved for it is never released. This is the highest-impact correctness gap in the workflow.
 `src/Services/OrderService/Application/Sagas/OrderSagaStateMachine.cs`
+*Still unfixed, but no longer silent:* `order_pending_oldest_age_seconds` and the `OrderStuckPending` alert now detect it (see [observability.md](observability.md)). Detection is not a fix — the stock stays reserved until someone intervenes.
 
 **Confirmed — the saga endpoint has no inbox, so a redelivered stock response is counted twice.**
 InventoryService's consumers dedupe via the EF inbox; OrderService's saga endpoint is configured through `ConfigureEndpoints` with no `UseEntityFrameworkOutbox`. Delivery is at-least-once, so a redelivered `StockReserved` would increment `ResponseCount` again and could finalize a multi-item order before every item has genuinely responded — confirming an order whose remaining items were never reserved. The same duplicate would also re-append to `ReservedProductIdsJson`, causing a double `ReleaseStock` on the compensation path.
@@ -38,8 +39,8 @@ The saga state transition and `repo.SaveChangesAsync()` on the order are separat
 **Potential risk — re-finalizing a resolved order faults the message.**
 `Order.Confirm()`/`Cancel()` throw `InvalidOperationException` when status isn't `Pending`. Any path that reaches `FinalizeAsync` twice for the same order (see the two items above) produces a hard fault rather than an idempotent no-op. Making these transitions idempotent would be a small, low-risk change.
 
-**Potential risk — no visibility into the `_error` queue.**
-Nothing consumes faults, no `IConsumeObserver`/fault consumer is registered, and no alerting exists. A message that exhausts retry is silently parked, which is exactly the condition that strands a saga.
+**Potential risk — nothing consumes the `_error` queue.**
+No `IConsumeObserver`/fault consumer is registered, so a message that exhausts retry is parked with no automatic handling. Its *depth* is now visible (`rabbitmq_detailed_queue_messages_ready{queue=~".*_error"}`, with the `RabbitMqErrorQueueNotEmpty` alert), but there is no Alertmanager, so nothing notifies anyone and nothing replays the message.
 
 **Potential risk — concurrent reservations rely on the inbox rather than optimistic concurrency.**
 `InventoryItems` has no row-version or concurrency token, and reserving is a read-modify-write. Two `ReserveStock` messages for the same product processed concurrently (different orders) could each read the same `QuantityAvailable`. Whether MassTransit's per-endpoint concurrency limit prevents this in practice is **not verifiable from the configuration in the repo** — no `PrefetchCount`/`ConcurrentMessageLimit` is set, so the defaults apply.

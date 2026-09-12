@@ -62,6 +62,8 @@ Program.cs         DI, auth, MassTransit, minimal-API endpoints (no controllers)
 | RabbitMQ | — | 5672, 15672 (management) |
 | Redis | — | 6379 |
 | Jaeger | — | 16686 (UI), 4317/4318 (OTLP) |
+| Prometheus | — | 9090 |
+| Grafana | — | 3000 |
 
 Postgres instances are separate containers per service (5432–5436 on the host). See [database.md](database.md).
 
@@ -72,7 +74,9 @@ Postgres instances are separate containers per service (5432–5436 on the host)
 - **Serilog** to console, enriched with `Service` and the current `TraceId`/`SpanId` (`Enrich.WithSpan`).
 - **OpenTelemetry tracing** with ASP.NET Core + HttpClient instrumentation, plus `"MassTransit"` as an extra activity source for the services that use the bus (User, Inventory, Order, Task). Catalog, Basket and the gateway pass no extra source.
 - OTLP exporter endpoint is **not** hardcoded — it is read from the standard `OTEL_EXPORTER_OTLP_*` env vars (compose points them at Jaeger).
+- **OpenTelemetry metrics** with the ASP.NET Core + HttpClient meters (RED signals), the `MassTransit` meter, and any app meter named `TaskManager.*`. Exported by **scrape**, not OTLP: every service serves `GET /metrics` and Prometheus pulls it. See [observability.md](observability.md).
 - The OpenTelemetry trace id doubles as the correlation id; MassTransit propagates it onto messages, so one id spans HTTP request → message → consumer. There is no hand-rolled correlation header.
+- RabbitMQ's own broker/queue metrics come from the `rabbitmq_prometheus` plugin on port 15692.
 
 Every service exposes `GET /health`: `AddDbContextCheck<T>` for the EF services, a Redis `PING` check in BasketService. The gateway has no health endpoint.
 

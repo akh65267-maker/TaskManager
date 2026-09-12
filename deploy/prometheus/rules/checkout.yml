@@ -1,0 +1,39 @@
+groups:
+  - name: checkout
+    rules:
+      # The saga has no timeout (docs/TODO.md): if a ReserveStock command or a
+      # stock response is lost, the order stays Pending and its reserved stock
+      # is never released, with nothing in the system noticing. Until the saga
+      # gains a timeout, this alert is the only thing that notices.
+      - alert: OrderStuckPending
+        expr: order_pending_oldest_age_seconds > 300
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: An order has been Pending for over 5 minutes
+          description: >-
+            Checkout normally completes in seconds. A persistently Pending order
+            means its saga is waiting for a response that will not arrive - check
+            the *_error queues in RabbitMQ and the OrderService logs for its
+            trace id.
+
+      # Messages that exhausted UseMessageRetry are parked here and nothing
+      # consumes them.
+      - alert: RabbitMqErrorQueueNotEmpty
+        expr: sum(rabbitmq_detailed_queue_messages_ready{queue=~".*_error"}) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Messages have been parked in a RabbitMQ error queue
+
+      # The outbox drains continuously; a growing backlog means the broker is
+      # unreachable or the delivery service is stalled.
+      - alert: OutboxBacklogGrowing
+        expr: order_outbox_backlog > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: OrderService outbox is not draining

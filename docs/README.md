@@ -10,9 +10,10 @@ Compact, verified knowledge about this repository. **Source code is the ultimate
 | [order-flow.md](order-flow.md) | The checkout saga: success, failure, compensation |
 | [authentication.md](authentication.md) | JWT issuance/validation, roles, admin access |
 | [database.md](database.md) | Database-per-service boundaries, schemas, migrations |
+| [observability.md](observability.md) | Logs/traces/metrics, the metrics that exist, dashboards, alerts, limits |
 | [decisions.md](decisions.md) | Architectural decisions evident from the implementation |
 | [TODO.md](TODO.md) | Confirmed issues, potential risks, open questions |
-| [platform-plan.md](platform-plan.md) | Decisions on metrics/Prometheus/Grafana, rate limiting, refresh tokens, CI/CD, dev tooling — not yet implemented |
+| [platform-plan.md](platform-plan.md) | Decisions on rate limiting, refresh tokens, CI/CD, dev tooling — phase 1 (metrics/Prometheus/Grafana) is implemented, the rest is not |
 
 Notes on scope:
 

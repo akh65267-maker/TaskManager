@@ -72,6 +72,21 @@ Rationale: unknown from the repository. Whether Catalog is the pattern the other
 Evidence: `ObservabilityExtensions` XML comment states it explicitly — the trace id is generated per request and propagates onto messages via MassTransit's native `ActivitySource`, "without a second, hand-rolled correlation header." Serilog's console template prints `{TraceId}` on every line.
 
 ---
+**Metrics are scraped by Prometheus, not pushed via OTLP like traces.**
+Evidence: `WithMetrics(... .AddPrometheusExporter())` in `ObservabilityExtensions`, plus `deploy/prometheus/prometheus.yml` listing each service as a target.
+Rationale (stated in the code comment): scraping keeps target up/down health, which a push pipeline loses. No OTel Collector was introduced — with a single backend per signal it would only add a hop. The comment names `AddOtlpExporter()` behind a Collector as the migration path if a second metrics backend ever appears.
+
+---
+**`GET /metrics` is mapped by an `IStartupFilter` in the shared library.**
+Evidence: `PrometheusScrapingEndpointStartupFilter` inside `ObservabilityExtensions`; no service's `Program.cs` calls `UseOpenTelemetryPrometheusScrapingEndpoint()`.
+Consequence: a new service gets the endpoint from `AddObservability` alone, but the endpoint is also not visible when reading a service's own startup code.
+
+---
+**The saga gauges are polled from the database rather than counted in memory.**
+Evidence: `OrderMetricsCollector` (a `BackgroundService`, 15 s) writes cached values that `OrderMetrics`' observable gauges read.
+Rationale (stated in the comments): the gauges describe persisted state, so an in-process counter would reset on restart and miss rows written by another instance; and a scrape must not run database queries on the collection thread. `order_pending_oldest_age_seconds` is derived from `Orders.CreatedAtUtc`, which avoided adding a timestamp column to the saga state and a migration with it.
+
+---
 **OTLP endpoint left to environment variables.**
 Evidence: `tracing.AddOtlpExporter()` with no endpoint argument; `OTEL_EXPORTER_OTLP_ENDPOINT`/`_PROTOCOL` set per service in compose.
 Rationale (stated): so each environment configures its own collector independently.
