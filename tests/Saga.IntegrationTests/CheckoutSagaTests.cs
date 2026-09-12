@@ -75,22 +75,12 @@ public class CheckoutSagaTests : IAsyncLifetime
         var rabbitUsername = Uri.UnescapeDataString(rabbitUserInfo[0]);
         var rabbitPassword = Uri.UnescapeDataString(rabbitUserInfo[1]);
 
-        // Wait until the RabbitMQ management API responds successfully.
-        // The TCP port becomes reachable slightly before the auth backend and
-        // exchange infrastructure are ready (worse on CI where the non-alpine
-        // image has more to load). Polling the management healthcheck endpoint
-        // is more reliable than a fixed sleep and avoids ACCESS_REFUSED races.
-        var managementPort = _rabbitMq.GetMappedPublicPort(15672);
-        var healthUrl = $"http://{_rabbitMq.Hostname}:{managementPort}/api/healthchecks/node";
-        using var mgmtClient = new HttpClient();
-        mgmtClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{rabbitUsername}:{rabbitPassword}")));
-        var readyDeadline = DateTime.UtcNow.AddSeconds(60);
-        while (DateTime.UtcNow < readyDeadline)
-        {
-            try { if ((await mgmtClient.GetAsync(healthUrl)).IsSuccessStatusCode) break; } catch { }
-            await Task.Delay(500);
-        }
+        // RabbitMQ's TCP port (5672) becomes reachable before its auth backend
+        // and exchange infrastructure are fully initialized. On cold CI runners
+        // with the non-alpine image this takes noticeably longer than locally;
+        // 15 s is enough headroom without relying on the management port (15672),
+        // which RabbitMqBuilder does not map by default.
+        await Task.Delay(TimeSpan.FromSeconds(15));
 
         // Migrate via a standalone DbContext, built directly from a connection
         // string rather than resolved from _orderFactory.Services. Touching
