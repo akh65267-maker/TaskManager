@@ -4,6 +4,8 @@ using MassTransit;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Observability;
+using Serilog;
 using TaskService;
 using TaskService.Application;
 using TaskService.Application.Consumers;
@@ -12,6 +14,8 @@ using TaskService.Domain;
 using TaskService.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.AddObservability("task-service", "MassTransit");
 
 var connectionString = builder.Configuration.GetConnectionString("TaskDatabase")
     ?? throw new InvalidOperationException("TaskDatabase connection string is missing.");
@@ -105,6 +109,8 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+
+app.UseSerilogRequestLogging();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

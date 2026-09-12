@@ -13,6 +13,8 @@ services:
       ReverseProxy__Clusters__inventory-cluster__Destinations__destination1__Address: http://inventory-api:8080/
       ReverseProxy__Clusters__basket-cluster__Destinations__destination1__Address: http://basket-api:8080/
       ReverseProxy__Clusters__order-cluster__Destinations__destination1__Address: http://order-api:8080/
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     ports:
       - "8000:8080"
     depends_on:
@@ -22,6 +24,7 @@ services:
       - inventory-api
       - basket-api
       - order-api
+      - jaeger
 
   tasks-api:
     build:
@@ -38,6 +41,8 @@ services:
       Jwt__Key: ${JWT_KEY}
       Jwt__Issuer: ${JWT_ISSUER}
       Jwt__Audience: ${JWT_AUDIENCE}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     ports:
       - "8080:8080"
     depends_on:
@@ -45,6 +50,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      jaeger:
+        condition: service_started
 
   users-api:
     build:
@@ -64,6 +71,8 @@ services:
       Admin__Email: ${ADMIN_EMAIL}
       Admin__Password: ${ADMIN_PASSWORD}
       Admin__DisplayName: ${ADMIN_DISPLAY_NAME}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     ports:
       - "8081:8080"
     depends_on:
@@ -71,6 +80,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      jaeger:
+        condition: service_started
 
   catalog-api:
     build:
@@ -84,11 +95,15 @@ services:
       Jwt__Key: ${JWT_KEY}
       Jwt__Issuer: ${JWT_ISSUER}
       Jwt__Audience: ${JWT_AUDIENCE}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     ports:
       - "8082:8080"
     depends_on:
       postgres-catalog:
         condition: service_healthy
+      jaeger:
+        condition: service_started
 
   inventory-api:
     build:
@@ -105,6 +120,8 @@ services:
       Jwt__Key: ${JWT_KEY}
       Jwt__Issuer: ${JWT_ISSUER}
       Jwt__Audience: ${JWT_AUDIENCE}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     ports:
       - "8083:8080"
     depends_on:
@@ -112,6 +129,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      jaeger:
+        condition: service_started
 
   basket-api:
     build:
@@ -125,11 +144,15 @@ services:
       Jwt__Key: ${JWT_KEY}
       Jwt__Issuer: ${JWT_ISSUER}
       Jwt__Audience: ${JWT_AUDIENCE}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     ports:
       - "8084:8080"
     depends_on:
       redis:
         condition: service_healthy
+      jaeger:
+        condition: service_started
 
   order-api:
     build:
@@ -146,6 +169,8 @@ services:
       Jwt__Key: ${JWT_KEY}
       Jwt__Issuer: ${JWT_ISSUER}
       Jwt__Audience: ${JWT_AUDIENCE}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     ports:
       - "8085:8080"
     depends_on:
@@ -153,6 +178,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      jaeger:
+        condition: service_started
 
   postgres:
     image: postgres:17
@@ -264,6 +291,16 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: taskflow-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
 
 volumes:
   taskflow-postgres-data:

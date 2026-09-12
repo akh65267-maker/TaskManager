@@ -8,9 +8,13 @@ using BasketService.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
+using Observability;
+using Serilog;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.AddObservability("basket-service");
 
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis")
     ?? throw new InvalidOperationException("Redis connection string is missing.");
@@ -73,6 +77,8 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+
+app.UseSerilogRequestLogging();
 
 if (app.Environment.IsDevelopment())
 {

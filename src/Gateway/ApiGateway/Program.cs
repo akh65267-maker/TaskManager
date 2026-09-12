@@ -1,4 +1,9 @@
+using Observability;
+using Serilog;
+
 var builder = WebApplication.CreateBuilder(args);
+
+builder.AddObservability("gateway");
 
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
@@ -16,6 +21,8 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+app.UseSerilogRequestLogging();
 
 app.UseCors();
 

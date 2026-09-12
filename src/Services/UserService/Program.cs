@@ -3,6 +3,8 @@ using MassTransit;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Observability;
+using Serilog;
 using UserService;
 using UserService.Application;
 using UserService.Application.Users;
@@ -11,6 +13,8 @@ using UserService.Infrastructure.Persistence;
 using UserService.Infrastructure.Security;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.AddObservability("user-service", "MassTransit");
 
 var connectionString = builder.Configuration.GetConnectionString("UserDatabase")
     ?? throw new InvalidOperationException("UserDatabase connection string is missing.");
@@ -79,6 +83,8 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+
+app.UseSerilogRequestLogging();
 
 // Seeds one admin account from configuration if it doesn't exist yet.
 // There's no invite/promote-user flow, so this is the only way an Admin

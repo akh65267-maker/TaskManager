@@ -5,14 +5,18 @@ using MassTransit;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Observability;
 using OrderService;
 using OrderService.Application;
 using OrderService.Application.Orders;
 using OrderService.Application.Sagas;
 using OrderService.Domain;
 using OrderService.Infrastructure.Persistence;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.AddObservability("order-service", "MassTransit");
 
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -116,6 +120,8 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+
+app.UseSerilogRequestLogging();
 
 if (app.Environment.IsDevelopment())
 {

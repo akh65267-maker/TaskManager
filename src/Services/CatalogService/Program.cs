@@ -7,8 +7,12 @@ using MediatR;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Observability;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.AddObservability("catalog-service");
 
 var connectionString = builder.Configuration.GetConnectionString("CatalogDatabase")
     ?? throw new InvalidOperationException("CatalogDatabase connection string is missing.");
@@ -54,6 +58,8 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+
+app.UseSerilogRequestLogging();
 
 if (app.Environment.IsDevelopment())
 {

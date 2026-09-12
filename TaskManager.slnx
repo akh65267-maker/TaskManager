@@ -16,6 +16,7 @@
   </Folder>
   <Folder Name="/src/Shared/">
     <Project Path="src/Shared/Contracts/Contracts.csproj" />
+    <Project Path="src/Shared/Observability/Observability.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/BasketService.UnitTests/BasketService.UnitTests.csproj" />
