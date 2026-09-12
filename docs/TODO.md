@@ -17,8 +17,8 @@ No `Admin` requirement, no paging, no filtering. `src/Services/UserService/Progr
 **Confirmed — inventory levels are publicly readable.**
 `GET /inventory` and `GET /inventory/{productId}` have no `RequireAuthorization`, unlike the write endpoints. Whether that is intentional is not stated anywhere. `src/Services/InventoryService/Program.cs`
 
-**Confirmed — no login rate limiting or account lockout.**
-`POST /users/login` is unauthenticated and unthrottled; no ASP.NET rate limiter is configured in any service or at the gateway. PBKDF2 at 100k iterations also makes each attempt CPU-expensive for the server, so this is a DoS surface as well as a credential-stuffing one.
+**Confirmed — no account lockout; login rate limiting is now in place.**
+`POST /users/login` is now rate-limited by IP: 10 requests per minute (sliding window, no queue). PBKDF2 at 100k iterations makes each attempt CPU-expensive so the limit is intentionally tight. No account-lockout mechanism exists — repeated failures from different IPs are not correlated.
 
 **Confirmed — tokens cannot be revoked.**
 A `jti` claim is minted but never persisted or checked, and there is no refresh token. Every token stays valid for its full hour. `JwtTokenGenerator`

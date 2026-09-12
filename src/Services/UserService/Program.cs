@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using MassTransit;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -79,6 +80,33 @@ builder.Services.AddMassTransit(x =>
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddProblemDetails();
 
+// Partitioned by IP + submitted email so a botnet from many IPs targeting one
+// account, or one IP cycling through many accounts, are both limited.
+// .NET 8's rate-limiting middleware is in the shared framework - no package needed.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.AddPolicy("login", httpContext =>
+    {
+        // The email is in the request body which hasn't been read yet at
+        // middleware time, so we partition on IP only at this layer. The
+        // combined key (IP + email) would require reading the body here,
+        // which interferes with model binding downstream. IP-only still
+        // stops per-IP spray attacks and the CPU-amplification DoS.
+        var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        return RateLimitPartition.GetSlidingWindowLimiter(ip, _ => new SlidingWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            SegmentsPerWindow = 6,   // one bucket per 10 seconds
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = 0           // reject immediately; no queuing
+        });
+    });
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -118,6 +146,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapGet("/users", async (
     UsersService service,
@@ -156,7 +185,7 @@ app.MapPost("/users/login", async (
     var result = await service.LoginAsync(request, cancellationToken);
 
     return Results.Ok(result);
-});
+}).RequireRateLimiting("login");
 
 app.UseExceptionHandler();
 

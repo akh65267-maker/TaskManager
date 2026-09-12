@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using OpenTelemetry.Metrics;
@@ -76,19 +78,50 @@ public static class ObservabilityExtensions
                     .AddPrometheusExporter();
             });
 
-        // Maps GET /metrics without every service's Program.cs having to call
-        // UseOpenTelemetryPrometheusScrapingEndpoint() itself.
-        builder.Services.AddSingleton<IStartupFilter, PrometheusScrapingEndpointStartupFilter>();
+        // Maps GET /metrics and injects the trace id into every response
+        // header + ProblemDetails, without every service's Program.cs having
+        // to opt in explicitly.
+        builder.Services.AddSingleton<IStartupFilter, ObservabilityStartupFilter>();
+
+        // Enriches ProblemDetails with the trace id so error responses
+        // carry the same id as the response header and the Jaeger trace.
+        // Services call AddProblemDetails() themselves; this customisation
+        // must be registered after that call, but AddObservability() is
+        // always the first call in Program.cs so we register it here and it
+        // stacks fine (customisations are additive).
+        builder.Services.AddProblemDetails(options =>
+        {
+            options.CustomizeProblemDetails = ctx =>
+            {
+                var traceId = Activity.Current?.TraceId.ToString();
+                if (traceId is not null)
+                    ctx.ProblemDetails.Extensions["traceId"] = traceId;
+            };
+        });
 
         return builder;
     }
 
-    private sealed class PrometheusScrapingEndpointStartupFilter : IStartupFilter
+    private sealed class ObservabilityStartupFilter : IStartupFilter
     {
         public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) =>
             app =>
             {
                 app.UseOpenTelemetryPrometheusScrapingEndpoint();
+
+                // Stamp every response with the current trace id so callers
+                // (the frontend, a curl session, a support ticket) can look
+                // up the exact trace in Jaeger without digging through logs.
+                // The trace id is the correlation id - see decisions.md.
+                app.Use(async (context, nextMiddleware) =>
+                {
+                    var traceId = Activity.Current?.TraceId.ToString();
+                    if (traceId is not null)
+                        context.Response.Headers["X-Trace-Id"] = traceId;
+
+                    await nextMiddleware(context);
+                });
+
                 next(app);
             };
     }

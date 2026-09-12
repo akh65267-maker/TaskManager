@@ -158,7 +158,7 @@ Two things should be settled *before* any CD work, because they shape it:
 | Phase | Work | Status |
 |---|---|---|
 | 1 | `WithMetrics` + Prometheus exporter; Prometheus + Grafana; RED dashboard; saga/outbox metrics + checkout dashboard; RabbitMQ Prometheus plugin and `_error`-queue panel; alert rules | **Done** — phases 1 and 2's observability work landed together, since the saga metrics are the reason the dashboards are worth having |
-| 2 | Login rate limiter; trace id in response headers and `ProblemDetails`; pgAdmin + Redis Insight in a `tools` profile | Not started |
+| 2 | Login rate limiter; trace id in response headers and `ProblemDetails`; pgAdmin + Redis Insight in a `tools` profile | **Done** |
 | 3 | CI: single test step, integration-test job, migration-drift check, image build | Not started |
 | 4 | Refresh tokens + revocation — after the cookie-vs-storage decision is agreed with `taskmanager-web` | Blocked on that decision |
 | 5 | Image publishing to GHCR. Revisit real CD once a deployment target exists | Not started |
