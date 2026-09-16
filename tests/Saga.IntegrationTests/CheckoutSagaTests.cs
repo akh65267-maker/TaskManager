@@ -442,11 +442,19 @@ public class CheckoutSagaTests : IAsyncLifetime
         }
     }
 
-    // The service serializes OrderStatus as a string via JsonStringEnumConverter
-    // (configured in OrderService/Program.cs). ReadFromJsonAsync uses default
-    // options with no converter, so we must provide one here or the deserializer
-    // throws when it sees "Pending"/"Confirmed"/"Cancelled" instead of an integer.
-    private static readonly JsonSerializerOptions _jsonOptions = new()
+    // JsonSerializerDefaults.Web is load-bearing, not decoration. The service
+    // serializes camelCase, so a bare JsonSerializerOptions - which defaults
+    // PropertyNameCaseInsensitive to false - matches none of OrderDto's
+    // PascalCase constructor parameters. Positional records bind by parameter
+    // name and silently take the default when nothing matches, so rather than
+    // throwing, every field comes back as default: Id as Guid.Empty and Status
+    // as OrderStatus.Pending, the zero value. WaitForResolutionAsync then reads
+    // Pending forever no matter what the database actually holds.
+    //
+    // The converter is still required on top: Web defaults handle the naming,
+    // but OrderStatus is written as "Confirmed"/"Cancelled" rather than an
+    // integer (JsonStringEnumConverter, configured in OrderService/Program.cs).
+    private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter() }
     };
