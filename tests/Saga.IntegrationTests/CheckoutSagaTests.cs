@@ -258,12 +258,15 @@ public class CheckoutSagaTests : IAsyncLifetime
         Assert.Equal(1, await GetInventoryQuantityAsync(scarceProductId));
     }
 
+    private readonly List<Guid> _seededProducts = new();
+
     private async Task SeedInventoryAsync(Guid productId, int quantityAvailable)
     {
         using var scope = _inventoryHost!.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<InventoryDbContext>();
         db.Add(new InventoryItem(productId, quantityAvailable));
         await db.SaveChangesAsync();
+        _seededProducts.Add(productId);
     }
 
     private async Task<int> GetInventoryQuantityAsync(Guid productId)
@@ -391,6 +394,54 @@ public class CheckoutSagaTests : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// Reads InventoryService's side of the exchange, which no diagnostic has
+    /// looked at so far - CountOutboxRowsAsync only ever queries _orderDb, so
+    /// everything downstream of ReserveStock has been invisible.
+    ///
+    /// Splits the remaining possibilities apart. A decremented quantity and an
+    /// InboxState row prove ReserveStockConsumer actually ran; OutboxMessage
+    /// rows left behind prove it published StockReserved but the message never
+    /// reached the broker. Untouched quantity with no InboxState row means
+    /// ReserveStock never arrived at all, and the stall is upstream.
+    /// </summary>
+    private async Task<string> DescribeInventoryStateAsync()
+    {
+        try
+        {
+            var options = new DbContextOptionsBuilder<InventoryDbContext>()
+                .UseNpgsql(_inventoryDb.GetConnectionString())
+                .Options;
+            await using var db = new InventoryDbContext(options);
+
+            var quantities = new List<string>();
+            foreach (var productId in _seededProducts)
+            {
+                var item = await db.Set<InventoryItem>().AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.ProductId == productId);
+                var shortId = productId.ToString("N")[..8];
+                quantities.Add($"{shortId}={item?.QuantityAvailable.ToString() ?? "(missing)"}");
+            }
+
+            var inbox = await db.Database
+                .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"InboxState\"")
+                .SingleAsync();
+            var messages = await db.Database
+                .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"OutboxMessage\"")
+                .SingleAsync();
+            var states = await db.Database
+                .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"OutboxState\"")
+                .SingleAsync();
+
+            return $"quantities: {string.Join(", ", quantities)}; " +
+                   $"InboxState={inbox}, OutboxMessage={messages}, OutboxState={states}";
+        }
+        catch (Exception ex)
+        {
+            return $"(inventory query failed: {ex.Message})";
+        }
+    }
+
     // The service serializes OrderStatus as a string via JsonStringEnumConverter
     // (configured in OrderService/Program.cs). ReadFromJsonAsync uses default
     // options with no converter, so we must provide one here or the deserializer
@@ -448,6 +499,7 @@ public class CheckoutSagaTests : IAsyncLifetime
                    $"outbox now: [{await CountOutboxRowsAsync()}]; " +
                    $"saga states: {sagaStates}; faults: {faults}; " +
                    $"order bus health: [{await DescribeBusHealthAsync()}]{Environment.NewLine}" +
+                   $"inventory: [{await DescribeInventoryStateAsync()}]{Environment.NewLine}" +
                    await DescribeBrokerTopologyAsync();
         }
         catch (Exception ex)
