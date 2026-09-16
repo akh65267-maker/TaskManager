@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 using OrderService.Application.Orders;
@@ -294,7 +295,62 @@ public class CheckoutSagaTests : IAsyncLifetime
         response.EnsureSuccessStatusCode();
 
         var body = await response.Content.ReadFromJsonAsync<CreatedOrderResponse>();
+
+        // Sampled immediately, because the count at timeout cannot distinguish
+        // "written and since delivered" from "never written at all" - both read
+        // as zero 90 s later. This is the sample that tells them apart.
+        _outboxAfterCreate = await CountOutboxRowsAsync();
+
         return body!.Id;
+    }
+
+    /// <summary>
+    /// MassTransit registers a bus health check whose description names each
+    /// configured receive endpoint and its state. The CI log only ever shows
+    /// the tail of the run, so the startup lines that would reveal a missing
+    /// or failed saga endpoint are never visible - this reads the same
+    /// information back at the point of failure.
+    /// </summary>
+    private async Task<string> DescribeBusHealthAsync()
+    {
+        try
+        {
+            var health = _orderFactory!.Services.GetRequiredService<HealthCheckService>();
+            var report = await health.CheckHealthAsync();
+
+            return string.Join(", ", report.Entries.Select(e =>
+                $"{e.Key}={e.Value.Status}{(string.IsNullOrEmpty(e.Value.Description) ? "" : $" ({e.Value.Description})")}"));
+        }
+        catch (Exception ex)
+        {
+            return $"(health check failed: {ex.Message})";
+        }
+    }
+
+    private string _outboxAfterCreate = "(not sampled)";
+
+    private async Task<string> CountOutboxRowsAsync()
+    {
+        try
+        {
+            var options = new DbContextOptionsBuilder<OrderDbContext>()
+                .UseNpgsql(_orderDb.GetConnectionString())
+                .Options;
+            await using var db = new OrderDbContext(options);
+
+            var messages = await db.Database
+                .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"OutboxMessage\"")
+                .SingleAsync();
+            var states = await db.Database
+                .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"OutboxState\"")
+                .SingleAsync();
+
+            return $"OutboxMessage={messages}, OutboxState={states}";
+        }
+        catch (Exception ex)
+        {
+            return $"(query failed: {ex.Message})";
+        }
     }
 
     // The service serializes OrderStatus as a string via JsonStringEnumConverter
@@ -346,14 +402,14 @@ public class CheckoutSagaTests : IAsyncLifetime
                 .Options;
             await using var db = new OrderDbContext(options);
 
-            var outboxPending = await db.Database
-                .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM \"OutboxMessage\"")
-                .SingleAsync();
             var sagaStates = await db.Database
                 .SqlQueryRaw<string>("SELECT coalesce(string_agg(\"CurrentState\", ','), '(no rows)') AS \"Value\" FROM \"OrderSagaStates\"")
                 .SingleAsync();
 
-            return $"OutboxMessage rows: {outboxPending}; saga states: {sagaStates}; faults: {faults}";
+            return $"outbox right after create: [{_outboxAfterCreate}]; " +
+                   $"outbox now: [{await CountOutboxRowsAsync()}]; " +
+                   $"saga states: {sagaStates}; faults: {faults}; " +
+                   $"order bus health: [{await DescribeBusHealthAsync()}]";
         }
         catch (Exception ex)
         {
