@@ -495,7 +495,21 @@ public class CheckoutSagaTests : IAsyncLifetime
                 .SqlQueryRaw<string>("SELECT coalesce(string_agg(\"CurrentState\", ','), '(no rows)') AS \"Value\" FROM \"OrderSagaStates\"")
                 .SingleAsync();
 
-            return $"outbox right after create: [{_outboxAfterCreate}]; " +
+            // Read the row straight from Postgres, bypassing the HTTP path the
+            // polling loop uses. FinalizeAsync logs a successful save at the
+            // same second the order is created, yet GET /orders keeps returning
+            // Pending for 90s afterwards. A committed update that later reads
+            // cannot see is impossible inside one database - so either this
+            // disagrees with HTTP (the read path is at fault) or it agrees
+            // (the write never actually committed).
+            var direct = await db.Database
+                .SqlQueryRaw<string>(
+                    "SELECT coalesce(string_agg(\"Status\" || '/' || coalesce(\"CancellationReason\", '-'), ','), '(no rows)') AS \"Value\" " +
+                    "FROM \"Orders\"")
+                .SingleAsync();
+
+            return $"orders table (direct): {direct}; " +
+                   $"outbox right after create: [{_outboxAfterCreate}]; " +
                    $"outbox now: [{await CountOutboxRowsAsync()}]; " +
                    $"saga states: {sagaStates}; faults: {faults}; " +
                    $"order bus health: [{await DescribeBusHealthAsync()}]{Environment.NewLine}" +
