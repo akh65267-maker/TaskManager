@@ -15,6 +15,14 @@ public class OrderSagaState : SagaStateMachineInstance
     public string CurrentState { get; set; } = default!;
     public byte[]? RowVersion { get; set; }
 
+    /// <summary>
+    /// When the saga started. Read by <c>CheckoutTimeoutSweeper</c> to find
+    /// checkouts that have been awaiting stock responses for too long; it lives
+    /// on the saga rather than being derived from the order so the sweep is a
+    /// single-table query against the rows it is actually scanning.
+    /// </summary>
+    public DateTimeOffset CreatedAtUtc { get; set; }
+
     public Guid UserId { get; set; }
     public string ItemsJson { get; set; } = "[]";
     public string ReservedProductIdsJson { get; set; } = "[]";

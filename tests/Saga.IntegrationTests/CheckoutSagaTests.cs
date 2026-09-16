@@ -119,6 +119,14 @@ public class CheckoutSagaTests : IAsyncLifetime
             builder.UseSetting("RabbitMq:Username", rabbitUsername);
             builder.UseSetting("RabbitMq:Password", rabbitPassword);
 
+            // The production default is minutes, which no test can wait for.
+            // 20s is still ~20x a healthy checkout - both of the other tests
+            // resolve in well under a second - so it is long enough not to
+            // cancel a merely slow one on a cold runner, while keeping the
+            // timeout test to roughly its own duration.
+            builder.UseSetting("Checkout:Timeout", "00:00:20");
+            builder.UseSetting("Checkout:SweepInterval", "00:00:01");
+
             builder.ConfigureServices(WaitForBusTopology);
         });
         _orderClient = _orderFactory.CreateClient();
@@ -256,6 +264,38 @@ public class CheckoutSagaTests : IAsyncLifetime
         // firing, not just the order being marked cancelled.
         Assert.Equal(10, await GetInventoryQuantityAsync(plentifulProductId));
         Assert.Equal(1, await GetInventoryQuantityAsync(scarceProductId));
+    }
+
+    /// <summary>
+    /// The stall the timeout exists for: a ReserveStock command that is never
+    /// answered. Stopping InventoryService leaves the command sitting unconsumed
+    /// in its queue, which is indistinguishable to the saga from a response that
+    /// was dropped or parked in an _error queue after exhausting retries.
+    ///
+    /// Before the timeout existed this order stayed Pending forever, and any
+    /// stock reserved for it stayed reserved forever with it.
+    /// </summary>
+    [Fact]
+    public async Task Checkout_WhenStockResponseNeverArrives_TimesOutAndCancelsOrder()
+    {
+        var productId = Guid.NewGuid();
+        await SeedInventoryAsync(productId, quantityAvailable: 10);
+        AuthenticateAs(Guid.NewGuid());
+
+        await _inventoryHost!.StopAsync();
+
+        var orderId = await CreateOrderAsync(new OrderItemRequest(productId, 4, 9.99m));
+
+        var order = await WaitForResolutionAsync(orderId);
+
+        Assert.Equal(OrderStatus.Cancelled, order.Status);
+        Assert.Contains("Timed out", order.CancellationReason!);
+
+        // Nothing ever got as far as reserving, so the compensation had nothing
+        // to release and the quantity must be untouched. Asserting this is what
+        // separates a timeout that cleaned up correctly from one that fired a
+        // spurious ReleaseStock for stock that was never taken.
+        Assert.Equal(10, await GetInventoryQuantityAsync(productId));
     }
 
     private readonly List<Guid> _seededProducts = new();

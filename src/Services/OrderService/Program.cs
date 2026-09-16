@@ -9,6 +9,7 @@ using OrderService.Application;
 using OrderService.Application.Orders;
 using OrderService.Application.Sagas;
 using OrderService.Domain;
+using OrderService.Infrastructure;
 using OrderService.Infrastructure.Observability;
 using OrderService.Infrastructure.Persistence;
 using Serilog;
@@ -44,6 +45,13 @@ builder.Services.AddScoped<OrdersService>();
 
 builder.Services.AddSingleton<OrderMetrics>();
 builder.Services.AddHostedService<OrderMetricsCollector>();
+
+var checkoutTimeout = builder.Configuration
+    .GetSection(CheckoutTimeoutOptions.SectionName)
+    .Get<CheckoutTimeoutOptions>() ?? new CheckoutTimeoutOptions();
+
+builder.Services.AddSingleton(checkoutTimeout);
+builder.Services.AddHostedService<CheckoutTimeoutSweeper>();
 
 var jwtKey = builder.Configuration["Jwt:Key"]
     ?? throw new InvalidOperationException("Jwt:Key configuration is missing.");

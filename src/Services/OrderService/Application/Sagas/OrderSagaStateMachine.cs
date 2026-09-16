@@ -22,6 +22,7 @@ public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
     public Event<OrderSubmitted> OrderSubmittedEvent { get; private set; } = default!;
     public Event<StockReserved> StockReservedEvent { get; private set; } = default!;
     public Event<StockReservationFailed> StockReservationFailedEvent { get; private set; } = default!;
+    public Event<CheckoutTimedOut> CheckoutTimedOutEvent { get; private set; } = default!;
 
     public OrderSagaStateMachine()
     {
@@ -36,10 +37,22 @@ public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
         Event(() => StockReservedEvent, x => x.CorrelateById(context => context.Message.OrderId));
         Event(() => StockReservationFailedEvent, x => x.CorrelateById(context => context.Message.OrderId));
 
+        // Discard rather than fault when no instance matches. The sweeper
+        // republishes on every tick until the saga is gone, so a timeout that
+        // arrives just after the checkout finished normally - or a second one
+        // for a saga the first already finalized - is expected, not an error.
+        // MassTransit's default for an unmatched non-initial event is to throw.
+        Event(() => CheckoutTimedOutEvent, x =>
+        {
+            x.CorrelateById(context => context.Message.OrderId);
+            x.OnMissingInstance(m => m.Discard());
+        });
+
         Initially(
             When(OrderSubmittedEvent)
                 .Then(context =>
                 {
+                    context.Saga.CreatedAtUtc = DateTimeOffset.UtcNow;
                     context.Saga.UserId = context.Message.UserId;
                     context.Saga.TotalItems = context.Message.Items.Count;
                     context.Saga.ResponseCount = 0;
@@ -80,7 +93,23 @@ public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
                 .Then(context => context.Saga.ResponseCount++)
                 .IfElse(context => context.Saga.ResponseCount >= context.Saga.TotalItems,
                     complete => complete.ThenAsync(FinalizeAsync).Finalize(),
-                    incomplete => incomplete)
+                    incomplete => incomplete),
+
+            // Give up waiting. Finalizing through the same failure path as a
+            // rejected reservation is the point: it releases whatever stock was
+            // already reserved for this order, which is what would otherwise be
+            // held forever, and cancels the order rather than leaving it Pending.
+            // ResponseCount is deliberately left alone - it is the record of how
+            // many items did answer, and FinalizeAsync does not consult it.
+            When(CheckoutTimedOutEvent)
+                .Then(context =>
+                {
+                    context.Saga.HasFailure = true;
+                    context.Saga.FailureReason ??=
+                        "Timed out waiting for stock reservation responses.";
+                })
+                .ThenAsync(FinalizeAsync)
+                .Finalize()
         );
 
         SetCompletedWhenFinalized();
