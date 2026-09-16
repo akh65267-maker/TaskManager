@@ -27,7 +27,12 @@ public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
     {
         InstanceState(x => x.CurrentState);
 
-        Event(() => OrderSubmittedEvent, x => x.CorrelateById(context => context.Message.OrderId));
+        Event(() => OrderSubmittedEvent, e =>
+        {
+            e.CorrelateById(context => context.Message.OrderId);
+            e.SelectId(context => context.Message.OrderId);
+        });
+        //Event(() => OrderSubmittedEvent, x => x.CorrelateById(context => context.Message.OrderId));
         Event(() => StockReservedEvent, x => x.CorrelateById(context => context.Message.OrderId));
         Event(() => StockReservationFailedEvent, x => x.CorrelateById(context => context.Message.OrderId));
 

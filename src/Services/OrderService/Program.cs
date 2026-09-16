@@ -1,6 +1,4 @@
-using System.Security.Claims;
-using System.Text;
-using System.Text.Json.Serialization;
+using Contracts.IntegrationEvents;
 using MassTransit;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +12,9 @@ using OrderService.Domain;
 using OrderService.Infrastructure.Observability;
 using OrderService.Infrastructure.Persistence;
 using Serilog;
+using System.Security.Claims;
+using System.Text;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -91,6 +92,17 @@ builder.Services.AddMassTransit(x =>
         {
             h.Username(builder.Configuration["RabbitMq:Username"] ?? "guest");
             h.Password(builder.Configuration["RabbitMq:Password"] ?? "guest");
+        });
+
+        cfg.ReceiveEndpoint("debug-order-submitted", e =>
+        {
+            e.Handler<OrderSubmitted>(context =>
+            {
+                Console.WriteLine(
+                    $"DEBUG OrderSubmitted received: {context.Message.OrderId}");
+
+                return Task.CompletedTask;
+            });
         });
 
         // StockReserved and StockReservationFailed for the same order can
