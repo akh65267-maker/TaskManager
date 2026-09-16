@@ -327,6 +327,44 @@ public class CheckoutSagaTests : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// Reads the broker's real topology via rabbitmqctl inside the container.
+    /// The outbox proves the message reached RabbitMQ and the bus reports
+    /// Healthy, yet nothing consumed it and nothing faulted - which is what a
+    /// publish to an exchange with no queue bound to it looks like. That has
+    /// been inferred twice now without being checked; list_queues shows
+    /// whether the saga's queue exists and has a consumer, and list_bindings
+    /// shows whether the OrderSubmitted exchange actually routes to it.
+    /// Uses exec rather than the management HTTP API, which RabbitMqBuilder
+    /// does not expose.
+    /// </summary>
+    private async Task<string> DescribeBrokerTopologyAsync()
+    {
+        try
+        {
+            var queues = await _rabbitMq.ExecAsync(new[]
+            {
+                "rabbitmqctl", "list_queues", "name", "messages", "consumers", "--no-table-headers"
+            });
+            var bindings = await _rabbitMq.ExecAsync(new[]
+            {
+                "rabbitmqctl", "list_bindings", "source_name", "destination_name", "--no-table-headers"
+            });
+
+            return $"queues:{Environment.NewLine}{Truncate(queues.Stdout)}{Environment.NewLine}" +
+                   $"bindings:{Environment.NewLine}{Truncate(bindings.Stdout)}";
+        }
+        catch (Exception ex)
+        {
+            return $"(broker topology query failed: {ex.Message})";
+        }
+
+        static string Truncate(string value) =>
+            string.IsNullOrWhiteSpace(value) ? "(empty)"
+            : value.Length <= 4000 ? value.TrimEnd()
+            : value[..4000] + " …(truncated)";
+    }
+
     private string _outboxAfterCreate = "(not sampled)";
 
     private async Task<string> CountOutboxRowsAsync()
@@ -409,7 +447,8 @@ public class CheckoutSagaTests : IAsyncLifetime
             return $"outbox right after create: [{_outboxAfterCreate}]; " +
                    $"outbox now: [{await CountOutboxRowsAsync()}]; " +
                    $"saga states: {sagaStates}; faults: {faults}; " +
-                   $"order bus health: [{await DescribeBusHealthAsync()}]";
+                   $"order bus health: [{await DescribeBusHealthAsync()}]{Environment.NewLine}" +
+                   await DescribeBrokerTopologyAsync();
         }
         catch (Exception ex)
         {
