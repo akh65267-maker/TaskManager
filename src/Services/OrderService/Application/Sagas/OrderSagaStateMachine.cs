@@ -3,8 +3,11 @@ using Contracts.Commands;
 using Contracts.Common;
 using Contracts.IntegrationEvents;
 using MassTransit;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using OrderService.Domain;
+using OrderService.Infrastructure.Persistence;
 
 namespace OrderService.Application.Sagas;
 
@@ -91,8 +94,20 @@ public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
         var saga = context.Saga;
         var provider = context.GetPayload<IServiceProvider>();
         var repo = provider.GetRequiredService<IOrderRepository>();
+        var log = provider.GetRequiredService<ILogger<OrderSagaStateMachine>>();
+        var db = provider.GetRequiredService<OrderDbContext>();
 
         var order = await repo.GetByIdAsync(saga.CorrelationId);
+
+        log.LogInformation(
+            "SAGA-FINALIZE {CorrelationId}: order={Found} status={Status} hasFailure={HasFailure} dbContext={ContextHash} txn={Transaction}",
+            saga.CorrelationId,
+            order is null ? "NULL" : "found",
+            order?.Status.ToString() ?? "-",
+            saga.HasFailure,
+            db.ContextId,
+            db.Database.CurrentTransaction?.TransactionId.ToString() ?? "(none)");
+
         if (order is null)
             return;
 
@@ -115,7 +130,17 @@ public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
             order.Confirm();
         }
 
+        var tracked = db.Entry(order).State;
+
         await repo.SaveChangesAsync();
+
+        log.LogInformation(
+            "SAGA-FINALIZE {CorrelationId}: saved. trackedBefore={Tracked} statusAfter={Status} entryAfter={After} sameContext={Same}",
+            saga.CorrelationId,
+            tracked,
+            order.Status,
+            db.Entry(order).State,
+            ReferenceEquals(db, db.Entry(order).Context));
 
         provider.GetRequiredService<OrderMetrics>().RecordFinalized(saga.HasFailure);
     }
