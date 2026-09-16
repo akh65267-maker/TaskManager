@@ -117,6 +117,8 @@ public class CheckoutSagaTests : IAsyncLifetime
             builder.UseSetting("RabbitMq:Port", rabbitUri.Port.ToString());
             builder.UseSetting("RabbitMq:Username", rabbitUsername);
             builder.UseSetting("RabbitMq:Password", rabbitPassword);
+
+            builder.ConfigureServices(WaitForBusTopology);
         });
         _orderClient = _orderFactory.CreateClient();
 
@@ -125,6 +127,8 @@ public class CheckoutSagaTests : IAsyncLifetime
             {
                 services.AddDbContext<InventoryDbContext>(o => o.UseNpgsql(_inventoryDb.GetConnectionString()));
                 services.AddScoped<IInventoryRepository, InventoryRepository>();
+
+                WaitForBusTopology(services);
 
                 services.AddMassTransit(x =>
                 {
@@ -176,6 +180,30 @@ public class CheckoutSagaTests : IAsyncLifetime
 
         await _inventoryHost.StartAsync();
     }
+
+    /// <summary>
+    /// Blocks host startup until MassTransit has finished declaring its
+    /// exchanges, queues and bindings.
+    ///
+    /// MassTransitHostOptions.WaitUntilStarted defaults to false, so
+    /// StartAsync returns as soon as the bus has been *asked* to start. The
+    /// topology is still being declared in the background. A message
+    /// published in that window goes to an exchange that has no queue bound
+    /// to it yet, and RabbitMQ silently discards it: no consumer runs, no
+    /// fault is produced, and the outbox considers it delivered. The saga
+    /// then never starts and the order sits in Pending until the test times
+    /// out with nothing to show for it.
+    ///
+    /// A fast machine usually wins that race, which is why this only ever
+    /// failed on cold CI runners. Waiting removes the race instead of
+    /// widening the window it has to win in.
+    /// </summary>
+    private static void WaitForBusTopology(IServiceCollection services) =>
+        services.AddOptions<MassTransitHostOptions>().Configure(options =>
+        {
+            options.WaitUntilStarted = true;
+            options.StartTimeout = TimeSpan.FromSeconds(60);
+        });
 
     public async Task DisposeAsync()
     {
