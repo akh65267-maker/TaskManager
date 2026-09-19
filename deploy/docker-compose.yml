@@ -352,6 +352,22 @@ services:
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
       PGADMIN_CONFIG_SERVER_MODE: "False"   # desktop mode: no login page
       PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      # servers.json is otherwise imported only on first launch, so edits to it
+      # (like the PassFile path) never reach an existing pgadmin-data volume.
+      PGADMIN_REPLACE_SERVERS_ON_STARTUP: "True"
+      PGPASS_PASSWORD: ${POSTGRES_PASSWORD}
+    # Writes the pgpass file inside the container rather than bind-mounting one:
+    # files mounted from a Windows drive under WSL appear as mode 777, and libpq
+    # silently ignores a pgpass that group/other can read. Generating it here
+    # also keeps the password off disk. ':' and '\' are escaped per pgpass
+    # syntax. All five instances share POSTGRES_PASSWORD, hence one wildcard line.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        umask 077
+        printf '*:5432:*:postgres:%s\n' "$$(printf '%s' "$$PGPASS_PASSWORD" | sed 's/[\\:]/\\&/g')" > /tmp/pgpass
+        exec /entrypoint.sh
     volumes:
       # Pre-provisions all five Postgres instances so you don't have to add
       # them manually after every container recreate.

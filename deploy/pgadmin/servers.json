@@ -8,7 +8,7 @@
       "MaintenanceDB": "taskflow",
       "Username": "postgres",
       "SSLMode": "prefer",
-      "PassFile": "/pgpass"
+      "PassFile": "/tmp/pgpass"
     },
     "2": {
       "Name": "UserService (userflow)",
@@ -18,7 +18,7 @@
       "MaintenanceDB": "userflow",
       "Username": "postgres",
       "SSLMode": "prefer",
-      "PassFile": "/pgpass"
+      "PassFile": "/tmp/pgpass"
     },
     "3": {
       "Name": "CatalogService (catalogflow)",
@@ -28,7 +28,7 @@
       "MaintenanceDB": "catalogflow",
       "Username": "postgres",
       "SSLMode": "prefer",
-      "PassFile": "/pgpass"
+      "PassFile": "/tmp/pgpass"
     },
     "4": {
       "Name": "InventoryService (inventoryflow)",
@@ -38,7 +38,7 @@
       "MaintenanceDB": "inventoryflow",
       "Username": "postgres",
       "SSLMode": "prefer",
-      "PassFile": "/pgpass"
+      "PassFile": "/tmp/pgpass"
     },
     "5": {
       "Name": "OrderService (orderflow)",
@@ -48,7 +48,7 @@
       "MaintenanceDB": "orderflow",
       "Username": "postgres",
       "SSLMode": "prefer",
-      "PassFile": "/pgpass"
+      "PassFile": "/tmp/pgpass"
     }
   }
 }
