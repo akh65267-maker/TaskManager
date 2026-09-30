@@ -92,6 +92,26 @@ builder.Services.AddMassTransit(x =>
             r.UsePostgres();
         });
 
+    // The transactional inbox/outbox on the saga's receive endpoint, which
+    // ConfigureEndpoints creates (there is nothing else for it to touch here).
+    // Two problems it fixes, both reproduced by Saga.IntegrationTests:
+    //
+    //  - Outbox: the saga publishes ReserveStock/ReleaseStock while its own
+    //    transaction is still open. Without this the command leaves immediately,
+    //    so a fast InventoryService can answer before the saga row is committed;
+    //    StockReserved then finds no saga and is dropped without a fault, and the
+    //    checkout hangs. With it, publishes are held until the transaction commits.
+    //  - Inbox: delivery is at-least-once, and a redelivered StockReserved used to
+    //    increment ResponseCount again, confirming a multi-item order before every
+    //    item had answered. The inbox deduplicates by MessageId and consumer.
+    //
+    // Applied through ConfigureEndpoints because the saga endpoint is not declared
+    // explicitly. It sits alongside the bus-level UseMessageRetry below the same way
+    // it does on InventoryService's explicit endpoints. The saga repository above
+    // uses the same scoped DbContext, which is what lets both share one transaction.
+    x.AddConfigureEndpointsCallback((context, name, endpoint) =>
+        endpoint.UseEntityFrameworkOutbox<OrderDbContext>(context));
+
     x.UsingRabbitMq((context, cfg) =>
     {
         var rabbitMqPort = builder.Configuration.GetValue<ushort?>("RabbitMq:Port") ?? 5672;

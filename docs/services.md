@@ -8,7 +8,7 @@ Responsibilities below are verified from `Program.cs`, application services, dom
 | CatalogService | Products (name, price, category), search/paging | Postgres `catalogflow` | none | read = anonymous, create = `Admin` |
 | BasketService | Per-user basket | Redis | none | all endpoints authenticated |
 | InventoryService | Stock per product, reserve/release/restock | Postgres `inventoryflow` | consumer + publisher (inbox+outbox) | reads = **anonymous**, writes = `Admin` |
-| OrderService | Orders, order status, **checkout saga** | Postgres `orderflow` | publisher + saga (outbox) | all endpoints authenticated |
+| OrderService | Orders, order status, **checkout saga** | Postgres `orderflow` | publisher + saga (outbox; inbox + outbox on the saga endpoint) | all endpoints authenticated |
 | TaskService | out of scope | Postgres `taskflow` | consumes `UserRegistered` | not analysed |
 
 ## UserService
@@ -58,7 +58,8 @@ Endpoints (all authenticated): `GET /orders` (caller's orders only), `GET /order
 - `CreateAsync` builds `Order` + `OrderItem`s from the request, adds it, publishes `OrderSubmitted`, then one `SaveChangesAsync` commits the order and the outbox message atomically.
 - **`UnitPrice` comes from the client request** and is stored as-is; nothing validates it against CatalogService. `TotalAmount` is computed from those values (`Sum(Quantity * UnitPrice)`, not persisted — `Ignore`d in EF).
 - `Order` invariants: requires a non-empty `UserId` and ≥1 item; `Confirm()` and `Cancel(reason)` both **throw `InvalidOperationException` unless status is `Pending`**. Status: `Pending → Confirmed | Cancelled`, terminal.
-- Hosts the `OrderSagaStateMachine` with the EF Core saga repository in its own DbContext, plus the transactional outbox (`UseBusOutbox`). See [order-flow.md](order-flow.md).
+- Hosts the `OrderSagaStateMachine` with the EF Core saga repository in its own DbContext, plus the transactional outbox (`UseBusOutbox`) and, on the saga's own receive endpoint, the EF inbox and outbox (`UseEntityFrameworkOutbox`, added through `AddConfigureEndpointsCallback` in `Program.cs`). See [order-flow.md](order-flow.md).
+- Runs two `BackgroundService`s: `OrderMetricsCollector` (refreshes the saga/outbox gauges) and `CheckoutTimeoutSweeper` (cancels checkouts older than `Checkout:Timeout`, default 5 min, swept every `Checkout:SweepInterval`, default 30 s; also deletes `TimedOut` sagas past `Checkout:TimedOutRetention`, default 24 h). Both are safe with several replicas, but the sweeper only runs while at least one replica is up.
 - Resilience: `UseMessageRetry(100, 250, 500, 1000 ms)` — sized for Postgres serialization conflicts (`40001`) when two stock responses hit the same saga row — then the same circuit-breaker settings as InventoryService.
 - `EnableRetryOnFailure` is deliberately **not** used here (nor in User/Inventory): EF's retrying execution strategy is incompatible with the explicit transactions MassTransit's saga repository and inbox/outbox open. Message-level retry covers that class of failure instead.
 

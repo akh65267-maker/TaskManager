@@ -40,11 +40,12 @@ Application metrics (`OrderService/Application/OrderMetrics.cs`, meter `TaskMana
 
 | Metric | Type | What it answers |
 |---|---|---|
-| `order_pending_oldest_age_seconds` | gauge | **Is a checkout stranded?** The saga has no timeout, so this is the only signal that one is. Near zero when healthy. |
-| `order_saga_active` | gauge | How many checkouts are in flight |
+| `order_pending_oldest_age_seconds` | gauge | **Is a checkout stranded?** Backstop for the saga timeout: `CheckoutTimeoutSweeper` cancels stalled checkouts after `Checkout:Timeout` (5 min by default), so this only stays high for an order the sweeper cannot resolve, e.g. one with no saga row. Near zero when healthy. |
+| `order_saga_active` | gauge | How many checkouts are in flight (`TimedOut` tombstones are not counted) |
 | `order_outbox_backlog` | gauge | Is the outbox draining into RabbitMQ |
 | `order_saga_finalized_total{outcome}` | counter | Confirmed vs cancelled rate |
 | `order_stock_reservation_failed_total` | counter | How often stock reservation is refused |
+| `order_late_reservation_released_total` | counter | Reservations that completed after their checkout had timed out and were released. Each one is stock the timeout would otherwise have lost; a steady rate means the timeout is shorter than real InventoryService latency, or InventoryService is unhealthy |
 
 The three gauges are **read from the database** by `OrderMetricsCollector` (a `BackgroundService`, 15 s interval) and cached; the gauge callbacks only read the cached value, because a Prometheus scrape must not run queries on the collection thread. They describe persisted state, so they are correct after a restart and across multiple instances — an in-memory counter would not be.
 
@@ -59,6 +60,8 @@ Prometheus evaluates `deploy/prometheus/rules/checkout.yml`. **There is no Alert
 | `OrderStuckPending` | an order has been `Pending` > 5 min |
 | `RabbitMqErrorQueueNotEmpty` | any `*_error` queue is non-empty (messages that exhausted retry; nothing consumes them) |
 | `OutboxBacklogGrowing` | > 50 outbox rows for 5 min |
+
+`OrderStuckPending` predates the saga timeout and its threshold equals the default `Checkout:Timeout` (5 min), plus a 2-minute `for`. A stalled checkout is now cancelled by the sweeper at roughly 5:00–5:30, before the alert can fire, so today it fires only for an order the sweeper cannot resolve. That is still worth alerting on, but the rule was not changed. A timed-out checkout is visible as a Warning log line, `Checkout saga {CorrelationId} exceeded the {Timeout} stock-reservation timeout`, and as `order_saga_finalized_total{outcome="cancelled"}`.
 
 ## Known limits
 

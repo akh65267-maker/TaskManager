@@ -1,6 +1,7 @@
 using MassTransit.EntityFrameworkCoreIntegration;
 using Microsoft.EntityFrameworkCore;
 using OrderService.Application;
+using OrderService.Application.Sagas;
 using OrderService.Domain;
 using OrderService.Infrastructure.Persistence;
 
@@ -56,7 +57,9 @@ public sealed class OrderMetricsCollector : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OrderDbContext>();
 
-        var activeSagas = await db.OrderSagaStates.CountAsync(cancellationToken);
+        // TimedOut rows are retained tombstones, not checkouts in flight.
+        var activeSagas = await db.OrderSagaStates
+            .CountAsync(s => s.CurrentState != OrderSagaStateMachine.TimedOutName, cancellationToken);
 
         var oldestPendingCreatedAt = await db.Orders
             .Where(o => o.Status == OrderStatus.Pending)

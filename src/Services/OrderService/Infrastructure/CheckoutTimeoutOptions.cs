@@ -23,4 +23,13 @@ public sealed class CheckoutTimeoutOptions
     /// after its deadline.
     /// </summary>
     public TimeSpan SweepInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// How long a timed-out saga is kept, after its deadline, so that a stock
+    /// reservation still in flight can be released when it finally completes.
+    /// Once this passes, a reservation that completes later has no saga to be
+    /// released by and is lost. It only needs to outlast how long InventoryService
+    /// can be down for; the rows are tiny.
+    /// </summary>
+    public TimeSpan TimedOutRetention { get; set; } = TimeSpan.FromHours(24);
 }

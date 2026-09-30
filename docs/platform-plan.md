@@ -32,7 +32,7 @@ Current baseline as it was *before* phase 1, verified at the time:
 | CD / deployment automation | **Skip for now** | There is no deployment target to deliver to |
 | Dedicated metrics for the saga | **Do now**, alongside metrics | This is where metrics earn their keep in *this* system |
 
-**A prioritisation caveat worth stating plainly:** none of this fixes the two highest-impact findings in [TODO.md](TODO.md) — the saga has no timeout (orders can strand in `Pending` with stock reserved forever) and order prices are client-supplied and unvalidated. Observability will *reveal* the first one faster; it won't fix either. If effort is limited, those two changes outrank this entire list. The strongest argument for doing metrics first is that a stuck-saga gauge turns an invisible failure into a visible one while the real fix is being written.
+**A prioritisation caveat worth stating plainly:** none of this fixes the two highest-impact findings in [TODO.md](TODO.md) — the saga has no timeout (orders can strand in `Pending` with stock reserved forever) and order prices are client-supplied and unvalidated. Observability will *reveal* the first one faster; it won't fix either. If effort is limited, those two changes outrank this entire list. *(Update: the saga timeout has since been implemented — see [order-flow.md](order-flow.md) — with one known gap, recorded in [TODO.md](TODO.md); order prices remain unvalidated.)* The strongest argument for doing metrics first is that a stuck-saga gauge turns an invisible failure into a visible one while the real fix is being written.
 
 ---
 
@@ -57,7 +57,7 @@ Generic RED dashboards are the cheap part. The metrics that pay for this work ma
 
 | Metric | Type | Answers |
 |---|---|---|
-| `order_saga_active` | gauge | **How many sagas are stuck?** With no saga timeout, this is the only signal that an order is stranded in `AwaitingStockReservation`. Highest-value single metric in the system. |
+| `order_saga_active` | gauge | **How many sagas are stuck?** This plan assumed no saga timeout, in which case this was the only signal of an order stranded in `AwaitingStockReservation`; the timeout has since been added, so it now shows checkouts in flight and any the sweeper has not yet resolved. |
 | `order_saga_duration` | histogram | Normal checkout latency, so "stuck" has a threshold |
 | `orders_finalized_total{outcome}` | counter | Confirm vs cancel ratio — a spike in cancels means stock or catalog trouble |
 | `stock_reservation_failed_total{reason}` | counter | Separates "insufficient stock" from "no inventory record" (a data-integrity problem, not a business one) |
@@ -163,4 +163,4 @@ Two things should be settled *before* any CD work, because they shape it:
 | 4 | Refresh tokens + revocation — after the cookie-vs-storage decision is agreed with `taskmanager-web` | Blocked on that decision |
 | 5 | Image publishing to GHCR. Revisit real CD once a deployment target exists | Not started |
 
-Keep in view that the saga timeout and order-price validation in [TODO.md](TODO.md) sit above everything in this table on impact.
+Keep in view that order-price validation and the post-timeout stock-reservation gap in [TODO.md](TODO.md) sit above everything in this table on impact (the saga timeout itself is done).

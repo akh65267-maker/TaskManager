@@ -17,7 +17,23 @@ namespace OrderService.Application.Sagas;
 /// </summary>
 public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
 {
+    // The persisted CurrentState strings. CheckoutTimeoutSweeper and
+    // OrderMetricsCollector query on them, so they are named here rather than
+    // repeated as literals that could drift from the properties below.
+    public const string AwaitingStockReservationName = nameof(AwaitingStockReservation);
+    public const string TimedOutName = nameof(TimedOut);
+
     public State AwaitingStockReservation { get; private set; } = default!;
+
+    /// <summary>
+    /// A checkout that gave up waiting. The order is already cancelled and the
+    /// stock the saga knew about already released, but the row is deliberately
+    /// kept for a while instead of finalized: a ReserveStock that was still in
+    /// flight (InventoryService was down) completes later, and its StockReserved
+    /// must find a saga so that reservation can be released too. CheckoutTimeoutSweeper
+    /// deletes the row once the retention window has passed.
+    /// </summary>
+    public State TimedOut { get; private set; } = default!;
 
     public Event<OrderSubmitted> OrderSubmittedEvent { get; private set; } = default!;
     public Event<StockReserved> StockReservedEvent { get; private set; } = default!;
@@ -95,12 +111,16 @@ public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
                     complete => complete.ThenAsync(FinalizeAsync).Finalize(),
                     incomplete => incomplete),
 
-            // Give up waiting. Finalizing through the same failure path as a
-            // rejected reservation is the point: it releases whatever stock was
-            // already reserved for this order, which is what would otherwise be
-            // held forever, and cancels the order rather than leaving it Pending.
+            // Give up waiting. Compensating through the same path as a rejected
+            // reservation is the point: it releases whatever stock was already
+            // reserved for this order, which is what would otherwise be held
+            // forever, and cancels the order rather than leaving it Pending.
             // ResponseCount is deliberately left alone - it is the record of how
             // many items did answer, and FinalizeAsync does not consult it.
+            //
+            // Unlike the two paths above this does NOT Finalize(): that would
+            // delete the row, and a reservation still in flight would then have
+            // no saga to be released by. It moves to TimedOut instead.
             When(CheckoutTimedOutEvent)
                 .Then(context =>
                 {
@@ -109,10 +129,56 @@ public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
                         "Timed out waiting for stock reservation responses.";
                 })
                 .ThenAsync(FinalizeAsync)
-                .Finalize()
+                .TransitionTo(TimedOut)
+        );
+
+        During(TimedOut,
+            // A reservation that completed after the deadline: nothing will use
+            // this stock (the order is cancelled), so give it back.
+            When(StockReservedEvent)
+                .ThenAsync(ReleaseLateReservationAsync),
+
+            // A late refusal took no stock, so there is nothing to undo.
+            Ignore(StockReservationFailedEvent),
+
+            // The sweeper only selects AwaitingStockReservation rows, but a
+            // timeout already in flight can still arrive; it has nothing to do.
+            Ignore(CheckoutTimedOutEvent)
         );
 
         SetCompletedWhenFinalized();
+    }
+
+    private static async Task ReleaseLateReservationAsync(BehaviorContext<OrderSagaState, StockReserved> context)
+    {
+        var saga = context.Saga;
+        var productId = context.Message.ProductId;
+
+        var reserved = JsonSerializer.Deserialize<List<Guid>>(saga.ReservedProductIdsJson) ?? new List<Guid>();
+        var lines = (JsonSerializer.Deserialize<List<OrderLineItem>>(saga.ItemsJson) ?? new List<OrderLineItem>())
+            .Where(i => i.ProductId == productId)
+            .ToList();
+
+        // ReservedProductIdsJson already holds everything released so far: what
+        // the timeout released, plus earlier late releases. StockReserved is
+        // delivered at least once and this endpoint has no inbox, so a duplicate
+        // is possible, and releasing twice would inflate stock. Counting
+        // (rather than a plain Contains) keeps an order with two lines for the
+        // same product correct: each line is released once, in order.
+        var alreadyReleased = reserved.Count(id => id == productId);
+        if (alreadyReleased >= lines.Count)
+            return;
+
+        var line = lines[alreadyReleased];
+
+        reserved.Add(productId);
+        saga.ReservedProductIdsJson = JsonSerializer.Serialize(reserved);
+
+        await context.Publish(new ReleaseStock(saga.CorrelationId, productId, line.Quantity));
+
+        context.GetPayload<IServiceProvider>()
+            .GetRequiredService<OrderMetrics>()
+            .RecordLateReservationReleased();
     }
 
     private static async Task FinalizeAsync<T>(BehaviorContext<OrderSagaState, T> context) where T : class

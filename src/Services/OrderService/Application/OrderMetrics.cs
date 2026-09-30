@@ -17,6 +17,7 @@ public sealed class OrderMetrics
 
     private readonly Counter<long> _finalized;
     private readonly Counter<long> _reservationFailures;
+    private readonly Counter<long> _lateReleases;
 
     private int _activeSagas;
     private double _oldestPendingOrderAgeSeconds;
@@ -34,15 +35,19 @@ public sealed class OrderMetrics
             "order_stock_reservation_failed_total",
             description: "StockReservationFailed responses observed by the saga.");
 
+        _lateReleases = meter.CreateCounter<long>(
+            "order_late_reservation_released_total",
+            description: "Stock reservations that completed after their checkout had timed out, and were released.");
+
         meter.CreateObservableGauge(
             "order_saga_active",
             () => Volatile.Read(ref _activeSagas),
             description: "Saga instances currently persisted, i.e. checkouts still in flight.");
 
-        // The saga has no timeout (see docs/TODO.md), so a lost message leaves an
-        // order Pending with its stock reserved forever. This age is the signal
-        // that has happened: in normal operation it stays near zero, and it is
-        // read from the orders table so it survives a service restart.
+        // CheckoutTimeoutSweeper cancels stalled checkouts, so this age stays high
+        // only for an order the sweeper cannot resolve (e.g. one with no saga row).
+        // In normal operation it stays near zero, and it is read from the orders
+        // table so it survives a service restart.
         meter.CreateObservableGauge(
             "order_pending_oldest_age_seconds",
             () => Volatile.Read(ref _oldestPendingOrderAgeSeconds),
@@ -66,6 +71,14 @@ public sealed class OrderMetrics
     /// the trace, where unbounded values are fine.
     /// </summary>
     public void RecordReservationFailure() => _reservationFailures.Add(1);
+
+    /// <summary>
+    /// Every increment is a checkout that was cancelled by the timeout while
+    /// InventoryService was slow or down - the stock this counter releases would
+    /// otherwise have been lost. A steady non-zero rate means the timeout is too
+    /// short for the real latency, or InventoryService is unhealthy.
+    /// </summary>
+    public void RecordLateReservationReleased() => _lateReleases.Add(1);
 
     public void UpdateGauges(int activeSagas, double oldestPendingOrderAgeSeconds, int outboxBacklog)
     {

@@ -1,6 +1,7 @@
 using Contracts.IntegrationEvents;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
+using OrderService.Application.Sagas;
 using OrderService.Infrastructure.Persistence;
 
 namespace OrderService.Infrastructure;
@@ -65,11 +66,21 @@ public sealed class CheckoutTimeoutSweeper : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OrderDbContext>();
 
+        await TimeOutExpiredAsync(scope, db, cancellationToken);
+        await PurgeExpiredTombstonesAsync(db, cancellationToken);
+    }
+
+    private async Task TimeOutExpiredAsync(IServiceScope scope, OrderDbContext db, CancellationToken cancellationToken)
+    {
         var deadline = DateTimeOffset.UtcNow - _options.Timeout;
 
+        // Only sagas still waiting. A TimedOut row is kept on purpose and is
+        // older than the deadline by definition, so without this filter every
+        // tombstone would be "timed out" again on every tick, forever.
         var expired = await db.OrderSagaStates
             .AsNoTracking()
-            .Where(s => s.CreatedAtUtc < deadline)
+            .Where(s => s.CurrentState == OrderSagaStateMachine.AwaitingStockReservationName
+                        && s.CreatedAtUtc < deadline)
             .Select(s => s.CorrelationId)
             .ToListAsync(cancellationToken);
 
@@ -78,7 +89,7 @@ public sealed class CheckoutTimeoutSweeper : BackgroundService
 
         // Published straight to the bus rather than through the outbox. The
         // sweep is already a retry loop - an undelivered timeout is republished
-        // on the next tick because the saga row is still there - so outbox
+        // on the next tick because the saga is still awaiting - so outbox
         // durability would add nothing here beyond a write on every tick.
         var bus = scope.ServiceProvider.GetRequiredService<IBus>();
 
@@ -90,6 +101,29 @@ public sealed class CheckoutTimeoutSweeper : BackgroundService
                 _options.Timeout);
 
             await bus.Publish(new CheckoutTimedOut(correlationId), cancellationToken);
+        }
+    }
+
+    private async Task PurgeExpiredTombstonesAsync(OrderDbContext db, CancellationToken cancellationToken)
+    {
+        // Measured from CreatedAtUtc, which is when the saga started, not when it
+        // timed out - so the window after the timeout is TimedOutRetention, give
+        // or take up to one sweep interval. Deleted in the database directly:
+        // nothing else is touching a row this old, and a message that does arrive
+        // for it afterwards simply finds no saga, exactly as before this state existed.
+        var purgeBefore = DateTimeOffset.UtcNow - _options.Timeout - _options.TimedOutRetention;
+
+        var purged = await db.OrderSagaStates
+            .Where(s => s.CurrentState == OrderSagaStateMachine.TimedOutName
+                        && s.CreatedAtUtc < purgeBefore)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        if (purged > 0)
+        {
+            _logger.LogInformation(
+                "Removed {Count} timed-out checkout saga(s) past the {Retention} retention window",
+                purged,
+                _options.TimedOutRetention);
         }
     }
 }

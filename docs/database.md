@@ -23,7 +23,7 @@ Each Postgres service has its own named volume; Redis has **none** — basket da
 
 **OrderDbContext** (`orderflow`)
 - `Orders` — PK `Id`; `Status` persisted as a `string` (max 20) via `HasConversion<string>`; `TotalAmount` is `Ignore`d (computed); `Items` mapped as `OwnsMany` with a shadow `Guid Id` PK and shadow FK `OrderId`; `UnitPrice` `HasPrecision(18,2)`.
-- `OrderSagaStates` — PK `CorrelationId`; `RowVersion` as `IsRowVersion()`; `CurrentState` max 64; `ItemsJson`/`ReservedProductIdsJson` required.
+- `OrderSagaStates` — PK `CorrelationId`; `RowVersion` as `IsRowVersion()`; `CurrentState` max 64 (`AwaitingStockReservation` or `TimedOut`; a finalized saga's row is deleted); `ItemsJson`/`ReservedProductIdsJson` required; `CreatedAtUtc` (`timestamptz`, DB default `now()`) is what the checkout timeout is measured from.
 - MassTransit `InboxState`, `OutboxState`, `OutboxMessage`.
 
 **InventoryDbContext** (`inventoryflow`)

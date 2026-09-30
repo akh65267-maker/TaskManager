@@ -9,6 +9,7 @@ RabbitMQ via MassTransit. All contracts are `sealed record`s in `src/Shared/Cont
 | `OrderSubmitted` | IntegrationEvents | `OrderId, UserId, IReadOnlyCollection<OrderLineItem>` |
 | `StockReserved` | IntegrationEvents | `OrderId, ProductId` |
 | `StockReservationFailed` | IntegrationEvents | `OrderId, ProductId, Reason` |
+| `CheckoutTimedOut` | IntegrationEvents | `OrderId` |
 | `UserRegistered` | IntegrationEvents | `UserId, Email, RegisteredAtUtc` |
 | `ReserveStock` | Commands | `OrderId, ProductId, Quantity` |
 | `ReleaseStock` | Commands | `OrderId, ProductId, Quantity` |
@@ -26,6 +27,7 @@ The Commands/IntegrationEvents split is naming only: **every message is sent wit
 | `StockReserved` | InventoryService `ReserveStockConsumer` | OrderService saga |
 | `StockReservationFailed` | InventoryService `ReserveStockConsumer` | OrderService saga |
 | `ReleaseStock` | OrderService saga (compensation) | InventoryService `ReleaseStockConsumer` |
+| `CheckoutTimedOut` | OrderService `CheckoutTimeoutSweeper` (straight to the bus, **not** the outbox) | OrderService saga |
 
 `ReleaseStockConsumer` publishes nothing — compensation is fire-and-forget from the saga's point of view.
 
@@ -34,7 +36,7 @@ The Commands/IntegrationEvents split is naming only: **every message is sent wit
 | Service | Configuration | Effect |
 |---|---|---|
 | UserService | `AddEntityFrameworkOutbox<UserDbContext>` + `UseBusOutbox` | outbox only (no consumers) |
-| OrderService | `AddEntityFrameworkOutbox<OrderDbContext>` + `UseBusOutbox`; endpoints via `ConfigureEndpoints` | outbox on publish; **no inbox on the saga endpoint** |
+| OrderService | `AddEntityFrameworkOutbox<OrderDbContext>` + `UseBusOutbox`; endpoints via `ConfigureEndpoints`, with `UseEntityFrameworkOutbox` added to them by `AddConfigureEndpointsCallback` | bus outbox for HTTP-originated publishes, and inbox **and** outbox on the saga endpoint (its `ReserveStock`/`ReleaseStock` are held until the saga's transaction commits; redelivered responses are dropped) |
 | InventoryService | `AddEntityFrameworkOutbox<InventoryDbContext>` (no `UseBusOutbox`) + `UseEntityFrameworkOutbox` per receive endpoint | inbox **and** outbox on both consumers |
 
 Inbox/outbox tables are created by `AddInboxStateEntity()` / `AddOutboxStateEntity()` / `AddOutboxMessageEntity()` in `OrderDbContext` and `InventoryDbContext`.
@@ -47,16 +49,17 @@ Verified:
 
 - **At-least-once delivery.** Standard RabbitMQ + MassTransit redelivery; nothing suppresses duplicates at the broker.
 - **Atomic "state change + message emitted"** where the outbox is used (UserService register, OrderService create order, both Inventory consumers): one DB transaction covers the row and the outbox record.
-- **Consumer-side deduplication in InventoryService only**, by `MessageId + ConsumerId` via the EF inbox. This is what prevents a redelivered `ReserveStock` from double-decrementing stock.
+- **Consumer-side deduplication**, by `MessageId + ConsumerId` via the EF inbox, in InventoryService's consumers and on the OrderService saga endpoint. It is what prevents a redelivered `ReserveStock` from double-decrementing stock, and a redelivered `StockReserved` from being counted twice. A concurrent duplicate logs an `ERR` `DbUpdateException` (unique constraint `AK_InboxState_MessageId_ConsumerId`) and a `WRN R-RETRY` before being discarded; that is the mechanism working, not a fault.
+- **The saga publishes only after its own commit** (outbox on its endpoint), so a reply can never reach it before its row exists. Before this, a fast InventoryService could answer first and the reply was dropped silently.
 - **Bounded retry then circuit breaking** on Inventory and Order (intervals and thresholds in [services.md](services.md)).
 
 Not provided by this implementation — do not assume it:
 
-- **No exactly-once processing.** Only Inventory's consumers dedupe; the OrderService saga endpoint has no inbox, so a redelivered `StockReserved`/`StockReservationFailed` would increment `ResponseCount` a second time (see [TODO.md](TODO.md)).
-- **No distributed transaction.** The saga's final `Order.Confirm()/Cancel()` + `SaveChanges` is a separate transaction from the saga-state transaction.
+- **No exactly-once guarantee.** Deduplication is by `MessageId`, so it only catches a redelivery of the *same message*; a logically duplicate message published twice with different ids would be processed twice. The inbox retention window also bounds it (MassTransit's cleanup service removes old inbox rows).
+- **No distributed transaction across services.** Within OrderService the saga endpoint's outbox puts the saga state, the order write and the outgoing messages on one shared `DbContext` transaction, but whether the order write and the saga write commit atomically has not been tested (see [TODO.md](TODO.md)).
 - **No message ordering guarantee.** The saga is written to tolerate arbitrary arrival order of per-item responses, and `UseMessageRetry` on OrderService exists specifically because concurrent responses race on the same saga row.
 - **No dead-letter/fault handling of its own.** No `ReceiveEndpoint` fault consumers, no `_error` queue monitoring, no `IConsumeObserver`. Messages that exhaust retries go to MassTransit's default `_error` queue and are not surfaced anywhere.
-- **No scheduling/timeouts.** No `MassTransit` scheduler is configured, so the saga has no timeout (see [order-flow.md](order-flow.md)).
+- **No message scheduler.** No `MassTransit` scheduler is configured. The saga's timeout is driven by a database sweep that publishes `CheckoutTimedOut` instead (see [order-flow.md](order-flow.md)). A timed-out saga is kept in a `TimedOut` state for a retention window so a reservation that completes late can still be released.
 
 ## Connection configuration
 
