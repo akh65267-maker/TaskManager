@@ -1,0 +1,14 @@
+# Applied ON TOP of deploy/docker-compose.yml by loadtests/run.sh, and removed again
+# when the run ends. It never affects a normal `docker compose up`.
+#
+# The checkout timeout is 5 minutes by default, which is right for real use and wrong
+# for a test: after a fault or an overload the system needs the timeout to elapse
+# before it has finished converging, and no invariant can be checked until then. A
+# 30 second timeout lets a run settle in about a minute. It is still ~30x a healthy
+# checkout (well under a second), so it does not cancel healthy orders.
+services:
+  order-api:
+    environment:
+      Checkout__Timeout: "00:00:30"
+      Checkout__SweepInterval: "00:00:05"
+      Checkout__TimedOutRetention: "00:15:00"
