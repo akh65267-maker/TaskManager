@@ -1,0 +1,70 @@
+name: Deploy to Azure
+
+# Inert until you opt in. It never runs on push or pull request, only from the
+# Actions tab, and even then the job is skipped unless the repository variable
+# AZURE_DEPLOY_ENABLED is set to 'true'. There is no Azure subscription connected
+# to this repository today, so as committed this workflow does nothing.
+#
+# To enable it later, see docs/azure-deployment.md ("Enabling the pipeline").
+# Authentication is OIDC federation: no client secret is stored in GitHub.
+# ci.yml is untouched and remains the gate; run this from a commit where it passed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [dev, staging, prod]
+        default: dev
+      stage:
+        description: Which stage to run
+        type: choice
+        options: [all, foundation, images, migrate, apps]
+        default: all
+      what_if:
+        description: Preview the infrastructure change instead of applying it
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write # OIDC token for azure/login
+  contents: read
+
+concurrency:
+  # Two deployments to one environment at once would race on the same resources.
+  group: azure-deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ vars.AZURE_DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    # A GitHub Environment named dev/staging/prod carries that environment's
+    # secrets and can require a reviewer before this job starts (use it for prod).
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy
+        env:
+          TM_LOCATION: ${{ vars.AZURE_LOCATION }}
+          TM_ADMIN_EMAIL: ${{ vars.TM_ADMIN_EMAIL }}
+          TM_POSTGRES_ADMIN_PASSWORD: ${{ secrets.TM_POSTGRES_ADMIN_PASSWORD }}
+          TM_JWT_KEY: ${{ secrets.TM_JWT_KEY }}
+          TM_RABBITMQ_PASSWORD: ${{ secrets.TM_RABBITMQ_PASSWORD }}
+          TM_ADMIN_SEED_PASSWORD: ${{ secrets.TM_ADMIN_SEED_PASSWORD }}
+          TM_GRAFANA_ADMIN_PASSWORD: ${{ secrets.TM_GRAFANA_ADMIN_PASSWORD }}
+        run: |
+          args=(--tag "${GITHUB_SHA::7}" --yes)
+          if [ "${{ inputs.what_if }}" = "true" ]; then args+=(--what-if); fi
+          ./infra/scripts/deploy-azure.sh "${{ inputs.environment }}" "${{ inputs.stage }}" "${args[@]}"

@@ -1,0 +1,11 @@
+# Applies to builds whose context is the repository root (the infra/images/*
+# Dockerfiles). The application images use src/ as their context and keep
+# using src/.dockerignore, so this file does not affect them or docker-compose.
+.git
+.vs
+.claude
+**/bin
+**/obj
+**/node_modules
+tests
+docs

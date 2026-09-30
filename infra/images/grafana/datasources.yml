@@ -1,0 +1,16 @@
+apiVersion: 1
+
+# Prometheus only. The compose datasources also wire Jaeger, and the Prometheus
+# datasource links latency exemplars into it. Azure has no Jaeger - traces go to
+# Application Insights - so both are dropped rather than left pointing at a
+# host that does not exist. The dashboards reference this datasource by uid.
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    # Internal ingress: plain HTTP on port 80, forwarded to Prometheus' 9090.
+    url: http://prometheus
+    isDefault: true
+    jsonData:
+      httpMethod: POST

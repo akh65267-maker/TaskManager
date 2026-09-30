@@ -13,6 +13,7 @@ Compact, verified knowledge about this repository. **Source code is the ultimate
 | [observability.md](observability.md) | Logs/traces/metrics, the metrics that exist, dashboards, alerts, limits |
 | [decisions.md](decisions.md) | Architectural decisions evident from the implementation |
 | [TODO.md](TODO.md) | Confirmed issues, potential risks, open questions |
+| [azure-deployment.md](azure-deployment.md) | The Azure Container Apps template (`infra/`): mapping, environments, local-vs-Azure config, how to deploy, known limits, changes awaiting approval — nothing is deployed |
 | [platform-plan.md](platform-plan.md) | Decisions on rate limiting, refresh tokens, CI/CD, dev tooling — phase 1 (metrics/Prometheus/Grafana) is implemented, the rest is not |
 
 Notes on scope:

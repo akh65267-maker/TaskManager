@@ -1,0 +1,52 @@
+# Azure Container Apps counterpart of deploy/prometheus/prometheus.yml.
+#
+# Differences from the compose file, and why:
+#  - Targets are the container app names on port 80. Internal ingress serves
+#    plain HTTP on 80 and forwards to the container's 8080; compose talks to
+#    8080 directly because there is no ingress in between.
+#  - The gateway is not scraped. Its ingress is external, so reaching it by
+#    name would mean TLS, and exposing /metrics publicly is not worth its
+#    (small) value. Gateway request metrics are simply absent in Azure.
+#  - A scrape hits one replica chosen by the ingress load balancer, so with
+#    more than one replica per service these numbers are a sample, not a sum.
+#    Keep metrics-relevant services at one replica, or move to an OTLP metrics
+#    path (see docs/azure-deployment.md).
+#  - `service` labels match compose so the same dashboards work unchanged.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: services
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["users-api:80"]
+        labels: { service: user-service }
+      - targets: ["catalog-api:80"]
+        labels: { service: catalog-service }
+      - targets: ["inventory-api:80"]
+        labels: { service: inventory-service }
+      - targets: ["basket-api:80"]
+        labels: { service: basket-service }
+      - targets: ["order-api:80"]
+        labels: { service: order-service }
+
+  # Reached through the broker app's additional TCP port mapping (15692).
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+
+  - job_name: rabbitmq-queues
+    metrics_path: /metrics/detailed
+    params:
+      family: ["queue_coarse_metrics"]
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
