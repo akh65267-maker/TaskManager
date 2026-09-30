@@ -1,0 +1,8 @@
+# Files that run on Linux must keep LF endings even when checked out on Windows,
+# where core.autocrlf=true would otherwise rewrite them to CRLF. A CRLF shell
+# script fails on Linux with "\r: command not found" (or "not found" for a CRLF
+# shebang), and a CRLF entrypoint copied into an image fails when the container
+# starts. Dockerfiles are pinned too: a RUN line continued with a trailing
+# backslash breaks when the backslash is followed by a CR.
+*.sh text eol=lf
+Dockerfile text eol=lf
