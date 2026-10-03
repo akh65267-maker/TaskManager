@@ -23,7 +23,13 @@ export const RESULT_NAME = __ENV.RESULT_NAME || `k6-${RUN_ID}`;
 // login is the one endpoint deliberately protected against being hammered.
 export const USERS = num('USERS', 10);
 
-// Stock for the dedicated load-test product. Checkout consumes real stock, so a
+// How many products the load is spread across. Real traffic is spread over a catalog;
+// concentrating it on one product makes every ReserveStock fight over a single
+// inventory row, which is a legitimate scenario (a flash sale) but a worst case, not
+// the default. PRODUCTS=1 reproduces it on purpose.
+export const PRODUCTS = num('PRODUCTS', 5);
+
+// Stock for EACH dedicated load-test product. Checkout consumes real stock, so a
 // run would otherwise exhaust a catalog product and turn into a test of the
 // "insufficient stock" path.
 export const STOCK = num('LOADTEST_STOCK', 1000000);

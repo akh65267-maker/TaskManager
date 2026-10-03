@@ -18,6 +18,7 @@
 #                        the full list is in loadtests/README.md
 #   --no-override        keep the 5-minute checkout timeout instead of the 30s test one
 #   --no-invariants      skip the post-run database checks
+#   --no-preflight       do not wait for a recently opened circuit breaker to close
 #   --list               show the profiles and faults
 #
 # It only ever targets the local stack. To load test a deployed environment, run the
@@ -52,7 +53,7 @@ esac
 PROFILE="$1"; shift
 case "$PROFILE" in load|stress|spike|soak|chaos) ;; *) die "unknown profile '$PROFILE' (see --list)";; esac
 
-FAULT="" OVERRIDE=true INVARIANTS=true
+FAULT="" OVERRIDE=true INVARIANTS=true PREFLIGHT=true
 EXTRA_ENV=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,6 +63,7 @@ while [[ $# -gt 0 ]]; do
     --env)            EXTRA_ENV+=("${2:?--env needs NAME=VALUE}"); shift 2 ;;
     --no-override)    OVERRIDE=false; shift ;;
     --no-invariants)  INVARIANTS=false; shift ;;
+    --no-preflight)   PREFLIGHT=false; shift ;;
     *) die "unknown option '$1'" ;;
   esac
 done
@@ -75,7 +77,7 @@ fi
 
 # Settings the k6 scripts read. Anything set in the environment or via --env is
 # forwarded; nothing else is, so a stray variable cannot change a run.
-PASS_ENV=(VUS HOLD RAMP STEPS STEP_S MAX_VUS BASE_VUS SPIKE_FACTOR HOLD_S SOAK_MINUTES
+PASS_ENV=(PRODUCTS VUS HOLD RAMP STEPS STEP_S MAX_VUS BASE_VUS SPIKE_FACTOR HOLD_S SOAK_MINUTES
   BASELINE_S FAULT_S RECOVERY_S SETTLE_S USERS LOADTEST_STOCK CHECKOUT_WAIT_S MIX_BROWSE
   MIX_BASKET P95_BROWSE_MS P95_DETAIL_MS P95_ORDER_CREATE_MS P95_CHECKOUT_MS
   MAX_FAILED_RATE MIN_CONFIRMED_RATE)
@@ -153,6 +155,41 @@ if $OVERRIDE; then
   OVERRIDE_APPLIED=true
   wait_for_url "$ORDER_HEALTH_URL" 90 || die "order-api did not become healthy"
 fi
+
+# ── preflight ────────────────────────────────────────────────────────────────
+
+error_total() {
+  docker exec taskflow-rabbitmq rabbitmqctl list_queues name messages --no-table-headers 2>/dev/null \
+    | awk '$1 ~ /_error$/ { s += $2 } END { print s + 0 }'
+}
+
+# The services trip a circuit breaker after a burst of failures and keep it open for
+# five minutes. A run that starts while one is open measures that leftover, not what
+# it was meant to, and the failure looks like the new run's. The breaker is in-process
+# state with no API, so the only outside sign is its stack frames in the log: wait
+# until none have appeared for five minutes. This only guards the START of a run; a
+# breaker that trips DURING one is a result and is left alone.
+wait_for_breakers_closed() {
+  local waited=0 recent container
+  while :; do
+    recent=0
+    for container in taskflow-inventory-api taskflow-order-api taskflow-users-api; do
+      recent=$((recent + $(docker logs --since 5m "$container" 2>&1 | grep -c 'CircuitBreaker')))
+    done
+    [[ "$recent" -eq 0 ]] && return 0
+    [[ "$waited" -eq 0 ]] && info "a circuit breaker opened in the last 5 minutes; waiting for it to close so it cannot spoil this run"
+    sleep 20; waited=$((waited + 20))
+    if [[ "$waited" -ge 420 ]]; then
+      echo "warning: circuit-breaker activity still showing after 7 minutes; continuing anyway" >&2
+      return 0
+    fi
+  done
+}
+
+$PREFLIGHT && wait_for_breakers_closed
+# Taken after the wait, so it reflects the queue as this run actually begins.
+ERRORS_BEFORE="$(error_total)"
+[[ "$ERRORS_BEFORE" -gt 0 ]] && echo "note: $ERRORS_BEFORE message(s) already sit in _error queues; only NEW ones will fail this run" >&2
 
 # ── resource sampling ────────────────────────────────────────────────────────
 
@@ -273,16 +310,16 @@ VERDICT_FAILS="$(grep -h LOADTEST_VERDICT "$RESULTS/k6.log" | grep -c '=FAIL' ||
 
 INV_RC=0
 if $INVARIANTS; then
-  STATE="$(grep -h LOADTEST_STATE "$RESULTS/k6.log" | head -1 | tr -d '\\')"
-  PRODUCT_ID="$(sed -n 's/.*"productId":"\([^"]*\)".*/\1/p' <<<"$STATE")"
-  INITIAL_STOCK="$(sed -n 's/.*"initialStock":\([0-9]*\).*/\1/p' <<<"$STATE")"
+  # One "LOADTEST_PRODUCT <id> <initial stock>" line per product the run used, joined
+  # as id:stock,id:stock for the stock-conservation check.
+  PRODUCTS_ARG="$(sed -n 's/.*LOADTEST_PRODUCT \([0-9a-fA-F-]\{36\}\) \([0-9]\{1,\}\).*/\1:\2/p' "$RESULTS/k6.log" | paste -sd, -)"
 
   # Long enough for the timeout to fire, late reservations to be released and the
   # outbox to drain - the slow parts of the system catching up after the load stops.
   SETTLE="${SETTLE_WAIT_S:-150}"
   info "checking invariants (waiting up to ${SETTLE}s for the system to settle)"
-  "$SCRIPT_DIR/scripts/invariants.sh" --start "$START_TS" ${PRODUCT_ID:+--product "$PRODUCT_ID"} \
-    ${INITIAL_STOCK:+--initial "$INITIAL_STOCK"} --wait "$SETTLE" | tee "$RESULTS/invariants.txt"
+  "$SCRIPT_DIR/scripts/invariants.sh" --start "$START_TS" ${PRODUCTS_ARG:+--products "$PRODUCTS_ARG"} \
+    --errors-before "$ERRORS_BEFORE" --wait "$SETTLE" | tee "$RESULTS/invariants.txt"
   INV_RC=${PIPESTATUS[0]}
 fi
 

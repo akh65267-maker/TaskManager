@@ -25,6 +25,20 @@ public class InventoryRepository : IInventoryRepository
             .FirstOrDefaultAsync(x => x.ProductId == productId, cancellationToken);
     }
 
+    public async Task<InventoryItem?> GetByProductIdForUpdateAsync(Guid productId, CancellationToken cancellationToken = default)
+    {
+        // EF has no FOR UPDATE, so this is raw SQL. ToListAsync rather than
+        // FirstOrDefaultAsync on purpose: composing LINQ over FromSql wraps the statement
+        // in a subquery, and the lock is only meant to be taken by this exact statement.
+        // The row is returned tracked, so Reserve/Release/Restock and SaveChanges work
+        // exactly as they did after GetByProductIdAsync.
+        var rows = await _db.InventoryItems
+            .FromSqlInterpolated($"SELECT * FROM \"InventoryItems\" WHERE \"ProductId\" = {productId} FOR UPDATE")
+            .ToListAsync(cancellationToken);
+
+        return rows.SingleOrDefault();
+    }
+
     public async Task<bool> ExistsAsync(Guid productId, CancellationToken cancellationToken = default)
     {
         return await _db.InventoryItems

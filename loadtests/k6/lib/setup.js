@@ -5,6 +5,7 @@ import {
   ADMIN_PASSWORD,
   BASE_URL,
   PRICE,
+  PRODUCTS,
   RUN_ID,
   STOCK,
   USERS,
@@ -46,52 +47,57 @@ export function login(email, password) {
   throw new Error(`login for ${email} still rate limited after 8 attempts`);
 }
 
-function createProduct() {
+function createProducts() {
   const admin = login(ADMIN_EMAIL, ADMIN_PASSWORD);
-  const product = postJson(
-    '/products',
-    {
-      name: `loadtest-${RUN_ID}`,
-      description: 'Created by the k6 load tests; safe to delete (loadtests/scripts/cleanup.sh).',
-      price: PRICE,
-      category: 'LoadTest',
-    },
-    admin.token,
-    'setup_create_product',
-  );
-  if (product.status !== 201) throw new Error(`creating the product failed: ${product.status} ${product.body}`);
-  const productId = product.json('id');
+  const products = [];
 
-  const stock = postJson('/inventory', { productId, quantityAvailable: STOCK }, admin.token, 'setup_create_stock');
-  if (stock.status !== 201) throw new Error(`creating the stock failed: ${stock.status} ${stock.body}`);
+  for (let i = 1; i <= PRODUCTS; i++) {
+    const created = postJson(
+      '/products',
+      {
+        name: `loadtest-${RUN_ID}-${i}`,
+        description: 'Created by the k6 load tests; safe to delete (loadtests/scripts/cleanup.sh).',
+        price: PRICE,
+        category: 'LoadTest',
+      },
+      admin.token,
+      'setup_create_product',
+    );
+    if (created.status !== 201) throw new Error(`creating product ${i} failed: ${created.status} ${created.body}`);
+    const productId = created.json('id');
 
-  return { productId, price: PRICE, initialStock: STOCK, created: true };
+    const stock = postJson('/inventory', { productId, quantityAvailable: STOCK }, admin.token, 'setup_create_stock');
+    if (stock.status !== 201) throw new Error(`creating stock for product ${i} failed: ${stock.status} ${stock.body}`);
+
+    products.push({ productId, price: PRICE, initialStock: STOCK });
+  }
+  return products;
 }
 
-// Without admin credentials: the best-stocked product that already exists. Loudly
-// second best, because a long run can drain it.
-function pickExistingProduct() {
+// Without admin credentials: the best-stocked products that already exist. Loudly
+// second best, because a long run can drain them.
+function pickExistingProducts() {
   const list = http.get(`${BASE_URL}/products?pageSize=100`, { tags: { name: 'setup_list' } }).json('items');
   const inventory = http.get(`${BASE_URL}/inventory`, { tags: { name: 'setup_inventory' } }).json();
   const stock = new Map(inventory.map((i) => [i.productId, i.quantityAvailable]));
 
   const candidates = list.filter((p) => p.price > 0 && (stock.get(p.id) ?? 0) > 0);
   if (candidates.length === 0) {
-    throw new Error('no purchasable product exists; set ADMIN_EMAIL/ADMIN_PASSWORD so one can be created');
+    throw new Error('no purchasable product exists; set ADMIN_EMAIL/ADMIN_PASSWORD so some can be created');
   }
   candidates.sort((a, b) => stock.get(b.id) - stock.get(a.id));
-  const best = candidates[0];
+  const best = candidates.slice(0, PRODUCTS);
   console.warn(
-    `WARNING: no admin credentials, using "${best.name}" with ${stock.get(best.id)} in stock. ` +
-      'A long or heavy run can exhaust it and start measuring the out-of-stock path instead.',
+    `WARNING: no admin credentials, using ${best.length} existing product(s). ` +
+      'A long or heavy run can exhaust them and start measuring the out-of-stock path instead.',
   );
-  return { productId: best.id, price: best.price, initialStock: stock.get(best.id), created: false };
+  return best.map((p) => ({ productId: p.id, price: p.price, initialStock: stock.get(p.id) }));
 }
 
 export function prepare() {
   guardTarget();
 
-  const product = ADMIN_EMAIL && ADMIN_PASSWORD ? createProduct() : pickExistingProduct();
+  const products = ADMIN_EMAIL && ADMIN_PASSWORD ? createProducts() : pickExistingProducts();
 
   const users = [];
   for (let i = 1; i <= USERS; i++) {
@@ -105,16 +111,11 @@ export function prepare() {
     users.push({ email, password, token: session.token, issuedAt: Date.now() });
   }
 
-  // Machine-readable: run.sh reads this line to know which product to check the
-  // stock-conservation invariant against, and what its stock started at.
-  console.log(
-    `LOADTEST_STATE ${JSON.stringify({
-      runId: RUN_ID,
-      productId: product.productId,
-      initialStock: product.initialStock,
-      createdProduct: product.created,
-    })}`,
-  );
+  // Machine-readable, one per product: run.sh reads these to know which products to
+  // check the stock-conservation invariant against, and what each started at.
+  for (const product of products) {
+    console.log(`LOADTEST_PRODUCT ${product.productId} ${product.initialStock}`);
+  }
 
-  return { ...product, users };
+  return { products, users };
 }

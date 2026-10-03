@@ -100,9 +100,13 @@ export function journey(data, tags = {}) {
   const user = currentUser(data);
   const roll = Math.random();
 
-  if (roll < MIX_BROWSE) browse(data, tags);
-  else if (roll < MIX_BROWSE + MIX_BASKET) basket(data, user, tags);
-  else checkout(data, user, tags);
+  // Each visit is about one product, picked at random from the ones under test.
+  const product = data.products[Math.floor(Math.random() * data.products.length)];
+  const view = { productId: product.productId, price: product.price };
+
+  if (roll < MIX_BROWSE) browse(view, tags);
+  else if (roll < MIX_BROWSE + MIX_BASKET) basket(view, user, tags);
+  else checkout(view, user, tags);
 
   // Think time. Without it a VU is a tight loop and "20 users" means far more load
   // than 20 people would generate.

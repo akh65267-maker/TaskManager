@@ -32,6 +32,7 @@ using IInventoryRepository = InventoryAlias::InventoryService.Domain.IInventoryR
 using InventoryRepository = InventoryAlias::InventoryService.Infrastructure.Persistence.InventoryRepository;
 using ReserveStockConsumer = InventoryAlias::InventoryService.Application.Consumers.ReserveStockConsumer;
 using ReleaseStockConsumer = InventoryAlias::InventoryService.Application.Consumers.ReleaseStockConsumer;
+using InventoryOutbox = InventoryAlias::InventoryService.Infrastructure.Messaging.InventoryOutbox;
 
 namespace Saga.IntegrationTests;
 
@@ -153,7 +154,7 @@ public class CheckoutSagaTests : IAsyncLifetime
 
                 services.AddMassTransit(x =>
                 {
-                    x.AddEntityFrameworkOutbox<InventoryDbContext>(o => o.UsePostgres());
+                    x.AddEntityFrameworkOutbox<InventoryDbContext>(InventoryOutbox.Configure);
                     x.AddConsumer<ReserveStockConsumer>();
                     x.AddConsumer<ReleaseStockConsumer>();
                     x.AddConsumer<FaultRecorder>();
@@ -443,6 +444,107 @@ public class CheckoutSagaTests : IAsyncLifetime
         response.EnsureSuccessStatusCode();
         var order = await response.Content.ReadFromJsonAsync<OrderDto>(_jsonOptions);
         Assert.Equal(OrderStatus.Pending, order!.Status);
+    }
+
+    /// <summary>
+    /// Many reservations of the same product arriving at once - what a flash sale looks
+    /// like, and what a broker outage produces when its backlog is delivered together.
+    /// Each ReserveStock reads the product's row, computes the new quantity and writes it
+    /// back, in a transaction Postgres will not let two of them win concurrently: the loser
+    /// gets 40001 "could not serialize access due to concurrent update". That is supposed
+    /// to be absorbed by retry, but retries that fire on the same schedule collide again,
+    /// and a message that loses every attempt is parked in an _error queue that nothing
+    /// reads. Found by the load tests, where it took a broker outage to show up.
+    ///
+    /// Published straight to the bus (no saga), so this tests InventoryService alone.
+    /// </summary>
+    [Fact]
+    public async Task Reservations_ForOneProduct_ArrivingTogether_AreAllApplied()
+    {
+        const int reservations = 40;
+        var productId = Guid.NewGuid();
+        await SeedInventoryAsync(productId, quantityAvailable: 1000);
+        _faults.Clear();
+
+        var bus = _orderFactory!.Services.GetRequiredService<IBus>();
+        await Task.WhenAll(Enumerable.Range(0, reservations)
+            .Select(_ => bus.Publish(new ReserveStock(Guid.NewGuid(), productId, 1))));
+
+        // Done when every unit is accounted for - or as soon as something faulted, which
+        // can only mean a message exhausted its retries (about 7 s into a collision).
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        int stock;
+        do
+        {
+            await Task.Delay(500);
+            stock = await GetInventoryQuantityAsync(productId);
+        }
+        while (stock != 1000 - reservations && _faults.IsEmpty && DateTime.UtcNow < deadline);
+
+        Assert.True(_faults.IsEmpty, $"{_faults.Count} reservation(s) failed: {_faults.FirstOrDefault()}");
+        Assert.Equal(1000 - reservations, stock);
+    }
+
+    /// <summary>
+    /// The check that makes the previous test meaningful. Removing the 40001 failures by
+    /// running at READ COMMITTED is only a fix if the row lock really serializes the
+    /// writers; if it did not, they would silently overwrite each other's quantity and
+    /// the test above could pass while the stock was wrong. Here demand far exceeds
+    /// stock, so any lost update shows as stock that is not exactly zero (never negative,
+    /// never left over), and every message must still be processed without a fault.
+    /// </summary>
+    [Fact]
+    public async Task Reservations_ExceedingStock_NeverOversell()
+    {
+        const int reservations = 40;
+        const int stock = 10;
+        var productId = Guid.NewGuid();
+        await SeedInventoryAsync(productId, quantityAvailable: stock);
+        _faults.Clear();
+
+        var bus = _orderFactory!.Services.GetRequiredService<IBus>();
+        await Task.WhenAll(Enumerable.Range(0, reservations)
+            .Select(_ => bus.Publish(new ReserveStock(Guid.NewGuid(), productId, 1))));
+
+        await WaitUntilAsync(
+            async () => await CountInventoryInboxAsync() >= reservations || !_faults.IsEmpty,
+            TimeSpan.FromSeconds(60),
+            $"all {reservations} reservations to be processed");
+
+        Assert.True(_faults.IsEmpty, $"{_faults.Count} reservation(s) failed: {_faults.FirstOrDefault()}");
+        Assert.Equal(0, await GetInventoryQuantityAsync(productId));
+    }
+
+    /// <summary>
+    /// Reservations and releases for the same product run on different endpoints, so
+    /// unlike the tests above they race each other even within one process. Each pair
+    /// cancels out, so the stock must end exactly where it started; a lost update in
+    /// either direction would leave it off.
+    /// </summary>
+    [Fact]
+    public async Task ReservationsAndReleases_ForOneProduct_ArrivingTogether_LeaveStockUnchanged()
+    {
+        const int pairs = 25;
+        const int stock = 500;
+        var productId = Guid.NewGuid();
+        await SeedInventoryAsync(productId, quantityAvailable: stock);
+        _faults.Clear();
+
+        var bus = _orderFactory!.Services.GetRequiredService<IBus>();
+        var messages = Enumerable.Range(0, pairs).SelectMany(_ => new Func<Task>[]
+        {
+            () => bus.Publish(new ReserveStock(Guid.NewGuid(), productId, 1)),
+            () => bus.Publish(new ReleaseStock(Guid.NewGuid(), productId, 1)),
+        });
+        await Task.WhenAll(messages.Select(send => send()));
+
+        await WaitUntilAsync(
+            async () => await CountInventoryInboxAsync() >= pairs * 2 || !_faults.IsEmpty,
+            TimeSpan.FromSeconds(60),
+            $"all {pairs * 2} messages to be processed");
+
+        Assert.True(_faults.IsEmpty, $"{_faults.Count} message(s) failed: {_faults.FirstOrDefault()}");
+        Assert.Equal(stock, await GetInventoryQuantityAsync(productId));
     }
 
     private async Task WaitUntilAsync(Func<Task<bool>> condition, TimeSpan timeout, string description)

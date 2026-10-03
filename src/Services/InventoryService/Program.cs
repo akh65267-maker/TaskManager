@@ -4,6 +4,7 @@ using InventoryService.Application;
 using InventoryService.Application.Consumers;
 using InventoryService.Application.Inventory;
 using InventoryService.Domain;
+using InventoryService.Infrastructure.Messaging;
 using InventoryService.Infrastructure.Persistence;
 using MassTransit;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -59,10 +60,7 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddMassTransit(x =>
 {
-    x.AddEntityFrameworkOutbox<InventoryDbContext>(o =>
-    {
-        o.UsePostgres();
-    });
+    x.AddEntityFrameworkOutbox<InventoryDbContext>(InventoryOutbox.Configure);
 
     x.AddConsumer<ReserveStockConsumer>();
     x.AddConsumer<ReleaseStockConsumer>();

@@ -47,7 +47,8 @@ Endpoints: `GET /inventory`, `GET /inventory/{productId}` (**no authorization**)
 - `InventoryItem` is keyed by `ProductId` and holds a single `QuantityAvailable`. Business rules live in the entity: `Reserve` rejects non-positive quantity and throws `InsufficientStockException` when `quantity > QuantityAvailable`; `Release` and `Restock` both add (identical behaviour, kept as separate intents).
 - There is **no separate "reserved" counter** — reserving decrements available stock, and compensation adds it back.
 - Consumers: `ReserveStockConsumer`, `ReleaseStockConsumer` (see [messaging.md](messaging.md)). Endpoints are declared explicitly (`ReceiveEndpoint("ReserveStock")`, `"ReleaseStock"`) rather than via `ConfigureEndpoints`, so the EF Core inbox can be attached for deduplication.
-- Resilience: `UseMessageRetry(100, 500, 1000, 5000 ms)` then `UseCircuitBreaker` (tracking 1 min, trip 15, active threshold 10, reset 5 min), applied bus-wide.
+- Resilience: `UseMessageRetry(100, 500, 1000, 5000 ms)` then `UseCircuitBreaker` (tracking 1 min, trip 15, active threshold 10, reset 5 min), applied bus-wide. A circuit breaker that trips stays open for the full five minutes, during which that endpoint consumes nothing; the retry intervals are identical for every message, so messages that fail together retry together.
+- Concurrency: reserve, release and the inbox/outbox run in a `READ COMMITTED` transaction (`InventoryOutbox`), and each consumer takes the item's row lock first (`GetByProductIdForUpdateAsync`, `SELECT … FOR UPDATE`). The default SERIALIZABLE isolation made concurrent reservations of one product fail with Postgres `40001` and exhaust their retries (40 at once: 37 failed). The restock endpoint does not take the lock; see [TODO.md](TODO.md).
 - Restock has no upper bound and no audit trail beyond the log line.
 
 ## OrderService

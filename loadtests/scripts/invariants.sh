@@ -7,7 +7,14 @@
 # message that never left the outbox, a poisoned queue. These read the databases and
 # the broker directly, so they do not depend on the API that was just being abused.
 #
-#   invariants.sh --start <UTC timestamp> --product <id> --initial <stock> [--wait <s>]
+#   invariants.sh --start <UTC timestamp> [--products <id:stock,id:stock,...>]
+#                 [--errors-before <n>] [--wait <s>]
+#
+# --products   each product the run used and the stock it started with. Stock is
+#              checked per product, not in total: one product losing a unit while
+#              another gains one would cancel out in a sum and hide both bugs.
+# --errors-before  how many messages already sat in _error queues when the run began,
+#              so leftovers from an earlier run do not fail this one.
 #
 # --wait keeps re-checking for up to that many seconds, because the system is
 # eventually consistent: the saga timeout, late stock releases and outbox delivery
@@ -16,13 +23,13 @@
 
 set -uo pipefail
 
-START="" PRODUCT="" INITIAL="" WAIT=0
+START="" PRODUCTS="" ERRORS_BEFORE=0 WAIT=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --start)   START="$2"; shift 2 ;;
-    --product) PRODUCT="$2"; shift 2 ;;
-    --initial) INITIAL="$2"; shift 2 ;;
-    --wait)    WAIT="$2"; shift 2 ;;
+    --start)          START="$2"; shift 2 ;;
+    --products)       PRODUCTS="$2"; shift 2 ;;
+    --errors-before)  ERRORS_BEFORE="$2"; shift 2 ;;
+    --wait)           WAIT="$2"; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 3 ;;
   esac
 done
@@ -31,8 +38,9 @@ done
 # Only ever spliced into SQL from values this script or run.sh produced, but validate
 # anyway: it costs nothing and these run against a database.
 [[ "$START" =~ ^[0-9T:.Z+-]+$ ]] || { echo "bad --start" >&2; exit 3; }
-[[ -z "$PRODUCT" || "$PRODUCT" =~ ^[0-9a-fA-F-]{36}$ ]] || { echo "bad --product" >&2; exit 3; }
-[[ -z "$INITIAL" || "$INITIAL" =~ ^[0-9]+$ ]] || { echo "bad --initial" >&2; exit 3; }
+[[ "$ERRORS_BEFORE" =~ ^[0-9]+$ ]] || { echo "bad --errors-before" >&2; exit 3; }
+[[ -z "$PRODUCTS" || "$PRODUCTS" =~ ^([0-9a-fA-F-]{36}:[0-9]+)(,[0-9a-fA-F-]{36}:[0-9]+)*$ ]] \
+  || { echo "bad --products (expected id:stock,id:stock)" >&2; exit 3; }
 
 order_db()     { docker exec taskflow-postgres-order psql -U postgres -d orderflow -tAqc "$1" 2>/dev/null | tr -d '[:space:]'; }
 inventory_db() { docker exec taskflow-postgres-inventory psql -U postgres -d inventoryflow -tAqc "$1" 2>/dev/null | tr -d '[:space:]'; }
@@ -70,18 +78,27 @@ evaluate() {
   #    Cancelled orders must have given theirs back. A positive difference is stock
   #    that vanished (a reservation nothing released); a negative one is stock that
   #    appeared (something released twice).
-  if [[ -n "$PRODUCT" && -n "$INITIAL" ]]; then
-    local sold final expected diff
-    sold=$(order_db "select coalesce(sum(i.\"Quantity\"),0) from \"OrderItem\" i join \"Orders\" o on o.\"Id\"=i.\"OrderId\" where o.\"Status\"='Confirmed' and o.\"CreatedAtUtc\" >= '$START' and i.\"ProductId\"='$PRODUCT'")
-    final=$(inventory_db "select \"QuantityAvailable\" from \"InventoryItems\" where \"ProductId\"='$PRODUCT'")
-    if [[ -z "$sold" || -z "$final" ]]; then
-      record "stock conserved" 1 "could not read stock or sold quantity"
-    else
-      expected=$((INITIAL - sold))
+  if [[ -n "$PRODUCTS" ]]; then
+    local entry product initial sold final expected diff n=0 bad=0 problems=""
+    local total_sold=0
+    for entry in ${PRODUCTS//,/ }; do
+      product="${entry%%:*}"; initial="${entry##*:}"; n=$((n + 1))
+      sold=$(order_db "select coalesce(sum(i.\"Quantity\"),0) from \"OrderItem\" i join \"Orders\" o on o.\"Id\"=i.\"OrderId\" where o.\"Status\"='Confirmed' and o.\"CreatedAtUtc\" >= '$START' and i.\"ProductId\"='$product'")
+      final=$(inventory_db "select \"QuantityAvailable\" from \"InventoryItems\" where \"ProductId\"='$product'")
+      if [[ -z "$sold" || -z "$final" ]]; then
+        bad=$((bad + 1)); problems+="${product:0:8}: unreadable; "
+        continue
+      fi
+      total_sold=$((total_sold + sold))
+      expected=$((initial - sold))
       diff=$((expected - final))
-      record "stock conserved" "$([[ "$diff" -eq 0 ]] && echo 0 || echo 1)" \
-        "started $INITIAL, $sold sold, expected $expected, found $final (difference $diff$([[ $diff -gt 0 ]] && echo ', stock LOST' || ([[ $diff -lt 0 ]] && echo ', stock CREATED')))"
-    fi
+      if [[ "$diff" -ne 0 ]]; then
+        bad=$((bad + 1))
+        problems+="${product:0:8}: expected $expected found $final ($([[ $diff -gt 0 ]] && echo "$diff LOST" || echo "$((-diff)) CREATED")); "
+      fi
+    done
+    record "stock conserved (per product)" "$([[ "$bad" -eq 0 ]] && echo 0 || echo 1)" \
+      "$n product(s), $total_sold units sold${problems:+, PROBLEMS: $problems}"
   fi
 
   # 4. The outbox drained: nothing committed is still waiting to reach the broker.
@@ -91,12 +108,18 @@ evaluate() {
   record "outbox drained" "$([[ "${order_outbox:-1}" -eq 0 && "${inventory_outbox:-1}" -eq 0 ]] && echo 0 || echo 1)" \
     "order ${order_outbox:-?}, inventory ${inventory_outbox:-?} undelivered"
 
-  # 5. No message exhausted its retries and was parked in an _error queue. Nothing
-  #    consumes those, so a message there is a failure that would otherwise be silent.
-  local errors
-  errors=$(docker exec taskflow-rabbitmq rabbitmqctl list_queues name messages --no-table-headers 2>/dev/null \
+  # 5. No message exhausted its retries during THIS run and was parked in an _error
+  #    queue. Nothing consumes those, so a message there is a failure that would
+  #    otherwise be silent. Compared with what was already there at the start, so
+  #    leftovers from an earlier run do not fail this one.
+  local listing errors_now new
+  listing=$(docker exec taskflow-rabbitmq rabbitmqctl list_queues name messages --no-table-headers 2>/dev/null \
     | awk '$1 ~ /_error$/ && $2 > 0 { printf "%s(%s) ", $1, $2 }')
-  record "no messages in _error queues" "$([[ -z "$errors" ]] && echo 0 || echo 1)" "${errors:-none}"
+  errors_now=$(docker exec taskflow-rabbitmq rabbitmqctl list_queues name messages --no-table-headers 2>/dev/null \
+    | awk '$1 ~ /_error$/ { s += $2 } END { print s + 0 }')
+  new=$((errors_now - ERRORS_BEFORE))
+  record "no new messages in _error queues" "$([[ "$new" -le 0 ]] && echo 0 || echo 1)" \
+    "$([[ "$new" -gt 0 ]] && echo "$new NEW (now: $listing)" || echo "none new${listing:+ ($ERRORS_BEFORE already there: $listing)}")"
 }
 
 deadline=$(( $(date +%s) + WAIT ))

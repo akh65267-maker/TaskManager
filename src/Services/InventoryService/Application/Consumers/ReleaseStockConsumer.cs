@@ -18,7 +18,7 @@ public class ReleaseStockConsumer : IConsumer<ReleaseStock>
     public async Task Consume(ConsumeContext<ReleaseStock> context)
     {
         var message = context.Message;
-        var item = await _repo.GetByProductIdAsync(message.ProductId, context.CancellationToken);
+        var item = await _repo.GetByProductIdForUpdateAsync(message.ProductId, context.CancellationToken);
 
         if (item is null)
         {

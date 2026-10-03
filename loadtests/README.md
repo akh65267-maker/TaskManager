@@ -25,10 +25,11 @@ Run these from WSL or Linux (`docker compose up -d` in `deploy/` first). They on
 ## What a run does
 
 1. Applies a **30-second checkout timeout** to `order-api` (default is 5 minutes) and restores it afterwards. Without this, no run can be judged until five minutes after the load stops.
-2. Starts k6 in a container on the compose network. Its setup registers a few throwaway users, logs each in once, and (given admin credentials from `deploy/.env`) creates a dedicated `loadtest-...` product with a million units of stock.
-3. Generates traffic: mostly browsing, some basket use, some checkouts. A checkout is timed from placing the order until it leaves `Pending`, because the saga makes it asynchronous and the HTTP latency of `POST /orders` alone says nothing about it.
-4. For `chaos`, breaks a dependency on a timeline, then restores it.
-5. Waits for the system to settle and checks the **invariants** below.
+2. **Preflight.** If a circuit breaker opened in the last five minutes it waits (up to seven) for it to close, because a run that starts while one is open measures that leftover, and the failure looks like the new run's. It also notes how many messages already sit in `_error` queues, so only new ones count. Skip with `--no-preflight`.
+3. Starts k6 in a container on the compose network. Its setup registers a few throwaway users, logs each in once, and (given admin credentials from `deploy/.env`) creates `PRODUCTS` dedicated `loadtest-...` products (default 5) with a million units of stock each.
+4. Generates traffic: mostly browsing, some basket use, some checkouts. A checkout is timed from placing the order until it leaves `Pending`, because the saga makes it asynchronous and the HTTP latency of `POST /orders` alone says nothing about it.
+5. For `chaos`, breaks a dependency on a timeline, then restores it.
+6. Waits for the system to settle and checks the **invariants** below.
 
 Results go to `loadtests/results/<profile>-<timestamp>/` (git-ignored): `k6.log`, the k6 JSON, `invariants.txt`, and for soaks a memory sample.
 
@@ -42,9 +43,9 @@ Latency and error rate say how the system felt. They say nothing about whether i
 |---|---|
 | No order left `Pending` | An order was abandoned: neither confirmed nor cancelled |
 | No saga still awaiting stock | The saga and its timeout both failed to finish the checkout |
-| **Stock conserved**: `initial - sold = final` | Positive difference: stock **vanished** (a reservation nothing released). Negative: stock was **created** (something released twice) |
+| **Stock conserved**, per product: `initial - sold = final` | Positive difference: stock **vanished** (a reservation nothing released). Negative: stock was **created** (something released twice). Checked per product, because one losing a unit while another gains one would cancel out in a sum |
 | Outbox drained | A committed message never reached the broker |
-| No messages in `_error` queues | A message exhausted its retries and nothing consumes those queues, so it would otherwise be silent |
+| No **new** messages in `_error` queues | A message exhausted its retries during this run and nothing consumes those queues, so it would otherwise be silent. Compared with what was already there at the start |
 
 The system is eventually consistent, so the check keeps retrying for up to 150 seconds (`SETTLE_WAIT_S`) before declaring a failure. One that clears was just still in flight; one that persists is real.
 
@@ -76,6 +77,7 @@ Pass with `--env NAME=VALUE` (or export them). Defaults in parentheses.
 | `SOAK_MINUTES` (30) | soak | Length (also `--minutes`) |
 | `BASELINE_S` (45), `FAULT_S` (60), `RECOVERY_S` (120), `SETTLE_S` (30) | chaos | Seconds per phase; unjudged period after the fault |
 | `USERS` (10) | all | Users logged in once and shared between VUs |
+| `PRODUCTS` (5) | all | Products the load is spread across. **`PRODUCTS=1` puts every order on one inventory row** - a flash sale, and a deliberately harsh case (see below) |
 | `MIX_BROWSE` (0.7), `MIX_BASKET` (0.2) | all | Traffic mix; the remainder is checkout |
 | `P95_BROWSE_MS`, `P95_DETAIL_MS`, `P95_ORDER_CREATE_MS`, `P95_CHECKOUT_MS`, `MAX_FAILED_RATE`, `MIN_CONFIRMED_RATE` | all | Pass/fail thresholds |
 | `LOADTEST_STOCK` (1000000) | all | Stock for the dedicated product |
@@ -84,14 +86,16 @@ Pass with `--env NAME=VALUE` (or export them). Defaults in parentheses.
 ## Why it is built this way
 
 - **Login cannot be load-tested, and the tests avoid it.** `POST /users/login` is limited to 10 per minute per IP on purpose (it is expensive by design and a brute-force target). So the tests log a small pool of users in once and share their tokens, retry on `429`, and the soak test re-logs-in each VU shortly before its one-hour token expires, staggered so they do not all hit the limit together.
-- **Checkout needs its own stock.** It consumes real stock, so a run would otherwise exhaust a catalog product and turn into a test of the out-of-stock path. Given admin credentials, each run creates a product with a million units.
+- **Checkout needs its own stock.** It consumes real stock, so a run would otherwise exhaust a catalog product and turn into a test of the out-of-stock path. Given admin credentials, each run creates products with a million units each.
+- **Spread the load, then concentrate it on purpose.** Every `ReserveStock` decrements one inventory row, so all orders on one product contend for that row. That is realistic (a flash sale) but it is the worst case, so load is spread over `PRODUCTS` products by default and `PRODUCTS=1` is the explicit hot-row test. The first chaos runs found this the hard way: concurrent reservations of one product failed with Postgres `40001` and most were parked in `_error` (40 at once: 37 failed). It is fixed (`docs/TODO.md`), and `Reservations_ForOneProduct_ArrivingTogether_AreAllApplied` in the integration suite now guards it far faster than a chaos run can.
+- **Do not trust the first explanation.** That finding was first blamed on the single hot product. Spreading the load over five products failed just the same, and the hot-product run passed; the actual cause was the transaction isolation level and the retry schedule. A repeatable failure was needed before the cause could be told apart from the noise, which is why the concurrency case now lives in the integration tests as a deterministic reproduction.
 - **Stress uses an arrival rate, not a VU count.** VU-based tests slow down together with the system, which hides the breaking point.
 - **k6 cannot break containers, so `run.sh` does.** The k6 script only generates traffic and labels each request with the phase it fell in (`baseline`, `fault`, `settling`, `recovery`); `run.sh` injects and restores the fault on a timeline measured from the moment traffic actually starts.
 - **Per-phase numbers need a trick.** k6 records a tagged sub-metric only when a threshold mentions it, so `k6/lib/phases.js` adds always-passing thresholds for each phase. They are excluded from the report's pass/fail list.
 
 ## Cost of a run
 
-Runs create real rows in the local stack: throwaway users, a `loadtest-...` product, and every order they placed. `scripts/cleanup.sh` removes exactly those, matched by name (`loadtest+%@example.com`, `loadtest-%`), and nothing else. The k6 results JSON deliberately omits the setup data, which holds those users' passwords and tokens.
+Runs create real rows in the local stack: throwaway users, `loadtest-...` products, and every order they placed. `scripts/cleanup.sh` removes exactly those, matched by name (`loadtest+%@example.com`, `loadtest-%`), and nothing else. The k6 results JSON deliberately omits the setup data, which holds those users' passwords and tokens.
 
 ## Testing a deployed environment
 

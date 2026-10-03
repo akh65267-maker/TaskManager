@@ -36,7 +36,7 @@ public class ReserveStockConsumerTests
         var message = new ReserveStock(orderId, productId, 4);
         var context = CreateContext(message);
 
-        _repo.Setup(x => x.GetByProductIdAsync(productId, It.IsAny<CancellationToken>())).ReturnsAsync(item);
+        _repo.Setup(x => x.GetByProductIdForUpdateAsync(productId, It.IsAny<CancellationToken>())).ReturnsAsync(item);
         context.InSequence(sequence)
             .Setup(x => x.Publish(It.IsAny<StockReserved>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -61,7 +61,7 @@ public class ReserveStockConsumerTests
         var message = new ReserveStock(orderId, productId, 5);
         var context = CreateContext(message);
 
-        _repo.Setup(x => x.GetByProductIdAsync(productId, It.IsAny<CancellationToken>())).ReturnsAsync(item);
+        _repo.Setup(x => x.GetByProductIdForUpdateAsync(productId, It.IsAny<CancellationToken>())).ReturnsAsync(item);
 
         await _sut.Consume(context.Object);
 
@@ -80,7 +80,7 @@ public class ReserveStockConsumerTests
         var message = new ReserveStock(orderId, productId, 1);
         var context = CreateContext(message);
 
-        _repo.Setup(x => x.GetByProductIdAsync(productId, It.IsAny<CancellationToken>())).ReturnsAsync((InventoryItem?)null);
+        _repo.Setup(x => x.GetByProductIdForUpdateAsync(productId, It.IsAny<CancellationToken>())).ReturnsAsync((InventoryItem?)null);
 
         await _sut.Consume(context.Object);
 
