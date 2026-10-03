@@ -64,7 +64,7 @@ export default function (data) {
   if (exec.vu.iterationInScenario === 0 && exec.vu.idInTest === 1) {
     console.log(`LOADTEST_TRAFFIC_STARTED ${Date.now()}`);
   }
-  journey(data, { phase: phaseAt(phases) });
+  journey(data, () => phaseAt(phases));
 }
 
 export function handleSummary(data) {
@@ -73,24 +73,34 @@ export function handleSummary(data) {
     return m ? m.values || m : {};
   };
 
-  // A step "held" if it stayed fast and clean. The last step that held before the
-  // first that did not is the capacity of this stack, on this machine.
+  // A step "held" if it stayed fast and clean AND its checkouts completed. HTTP alone
+  // is not enough: overload here shows up as checkouts that stall (the saga is async)
+  // while every request still returns 200, so a step can look perfect at the HTTP level
+  // with half its checkouts unresolved. The last step that held before the first that
+  // did not is the capacity of this stack, on this machine.
   let held = null;
   let brokeAt = null;
+  let why = '';
   for (const { name } of phases) {
     if (name === 'recovery') continue;
     const duration = values(`http_req_duration{phase:${name}}`);
     const failed = values(`http_req_failed{phase:${name}}`);
     if (duration['p(95)'] === undefined) continue;
-    const ok = (failed.rate ?? 0) < 0.02 && duration['p(95)'] < 1000;
-    if (ok && brokeAt === null) held = name;
-    if (!ok && brokeAt === null) brokeAt = name;
+    const confirmed = values(`checkout_confirmed{phase:${name}}`);
+    const confirmedRate = confirmed.rate;
+    const reasons = [];
+    if ((failed.rate ?? 0) >= 0.02) reasons.push(`${((failed.rate ?? 0) * 100).toFixed(1)}% requests failed`);
+    if (duration['p(95)'] >= 1000) reasons.push(`p95 ${duration['p(95)'].toFixed(0)}ms`);
+    if (confirmedRate !== undefined && confirmedRate < 0.95) reasons.push(`only ${(confirmedRate * 100).toFixed(0)}% of checkouts confirmed`);
+    if (reasons.length === 0 && brokeAt === null) held = name;
+    if (reasons.length > 0 && brokeAt === null) { brokeAt = name; why = reasons.join(', '); }
   }
 
   const extra = [
     '',
-    held ? `Highest step that held (<2% failed, p95 <1s): ${held}  (iterations/second)` : 'No step held.',
-    brokeAt ? `First step that did not hold: ${brokeAt}` : 'Every step held: raise STEPS to find the limit.',
+    held ? `Highest step that held (<2% failed, p95 <1s, >=95% of checkouts confirmed): ${held}  (iterations/second)` : 'No step held.',
+    brokeAt ? `First step that did not hold: ${brokeAt} (${why})` : 'Every step held: raise STEPS to find the limit.',
+    'A step can pass at HTTP level and still fail on checkouts: overload shows as stalled async checkouts, not errors.',
     'These are numbers for this machine running the whole stack and the load generator together.',
   ];
 

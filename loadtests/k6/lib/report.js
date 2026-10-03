@@ -37,6 +37,14 @@ export function phaseTable(data, phases) {
       `  ${r.phase.padEnd(14)} ${String(r.requests ?? 0).padStart(8)} ${ms(r.p50)} ${ms(r.p95)} ${ms(r.p99)} ${pct(r.failed)} ${pct(r.confirmed).padStart(13)}`,
     );
   }
+  const straddle = metric(data, 'checkout_confirmed{phase:straddle}');
+  const crossed = (straddle.passes ?? 0) + (straddle.fails ?? 0);
+  if (crossed > 0) {
+    lines.push(
+      `  (${crossed} checkout(s) began in one phase and ended in another; ` +
+        `${straddle.passes ?? 0} confirmed. They are counted in no phase above, so a fault cannot be blamed on the baseline.)`,
+    );
+  }
   return { lines, rows };
 }
 

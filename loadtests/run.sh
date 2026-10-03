@@ -75,6 +75,12 @@ elif [[ -n "$FAULT" ]]; then
   die "--fault only applies to the chaos profile"
 fi
 
+# Unless told otherwise, give the fault the settle time it needs (see faults.sh).
+if [[ "$PROFILE" == "chaos" && -z "${SETTLE_S:-}" ]]; then
+  export SETTLE_S="$(fault_settle "$FAULT")"
+  export RECOVERY_S="${RECOVERY_S:-$((SETTLE_S + 60))}"
+fi
+
 # Settings the k6 scripts read. Anything set in the environment or via --env is
 # forwarded; nothing else is, so a stray variable cannot change a run.
 PASS_ENV=(PRODUCTS VUS HOLD RAMP STEPS STEP_S MAX_VUS BASE_VUS SPIKE_FACTOR HOLD_S SOAK_MINUTES
@@ -204,14 +210,18 @@ start_sampler() {
   SAMPLER_PID=$!
 }
 
-# A container whose memory only ever grows is the classic soak-test finding. Compares
-# the first and last tenth of the samples, and only flags growth that is both large in
-# relative terms and not just a few MiB of noise. A warning, not a failure: a JIT or a
-# cache warming up looks the same as a leak until you run longer.
+# A container whose memory only ever grows is the classic soak-test finding. The first
+# 40% of the run is treated as warm-up and ignored: a .NET service that has just started
+# climbs for minutes (the heap grows before the collector first compacts it), and a first
+# version of this that compared the start of the run with the end flagged exactly that as
+# a leak. What is compared is the window at 40-50% of the run against the last tenth: a
+# leak is still climbing there, warm-up has already levelled off or fallen. Only growth
+# that is large in relative terms and not a few MiB of noise is flagged, and it is a
+# warning, not a failure - a short run cannot tell a slow leak from a slow plateau.
 memory_report() {
   [[ -s "$RESULTS/stats.csv" ]] || return 0
   echo
-  echo "Container memory, first tenth of the run vs last tenth:"
+  echo "Container memory, mid-run (40-50%) vs the last tenth (first 40% ignored as warm-up):"
   awk -F, '
     function mib(s,   p, n, u) {
       split(s, p, " "); n = p[1]; u = p[1]
@@ -224,14 +234,18 @@ memory_report() {
     { c[$2]++; m[$2, c[$2]] = mib($3) }
     END {
       for (name in c) {
-        n = c[name]; k = int(n / 10); if (k < 1) k = 1
-        first = 0; last = 0
-        for (i = 1; i <= k; i++) first += m[name, i]
+        n = c[name]
+        lo = int(n * 0.4); hi = int(n * 0.5); if (lo < 1) lo = 1; if (hi < lo) hi = lo
+        k = int(n / 10); if (k < 1) k = 1
+        mid = 0; last = 0
+        for (i = lo; i <= hi; i++) mid += m[name, i]
+        mid /= (hi - lo + 1)
         for (i = n - k + 1; i <= n; i++) last += m[name, i]
-        first /= k; last /= k
-        growth = first > 0 ? (last - first) / first * 100 : 0
-        flag = (growth > 50 && last - first > 50) ? "  <-- WARN: growing" : ""
-        printf "  %-30s %8.0f MiB -> %8.0f MiB  (%+5.0f%%)%s\n", name, first, last, growth, flag
+        last /= k
+        growth = mid > 0 ? (last - mid) / mid * 100 : 0
+        flag = (growth > 50 && last - mid > 50) ? "  <-- WARN: still growing" : ""
+        printf "  %-30s %8.0f MiB -> %8.0f MiB  (%+5.0f%%)%s
+", name, mid, last, growth, flag
       }
     }' "$RESULTS/stats.csv" | sort
 }
@@ -316,7 +330,9 @@ if $INVARIANTS; then
 
   # Long enough for the timeout to fire, late reservations to be released and the
   # outbox to drain - the slow parts of the system catching up after the load stops.
-  SETTLE="${SETTLE_WAIT_S:-150}"
+  # Stress can leave a backlog that takes minutes to drain (observed >150 s at 600 it/s).
+  SETTLE_DEFAULT=150; [[ "$PROFILE" == "stress" ]] && SETTLE_DEFAULT=600
+  SETTLE="${SETTLE_WAIT_S:-$SETTLE_DEFAULT}"
   info "checking invariants (waiting up to ${SETTLE}s for the system to settle)"
   "$SCRIPT_DIR/scripts/invariants.sh" --start "$START_TS" ${PRODUCTS_ARG:+--products "$PRODUCTS_ARG"} \
     --errors-before "$ERRORS_BEFORE" --wait "$SETTLE" | tee "$RESULTS/invariants.txt"
@@ -329,6 +345,9 @@ echo
 echo "Results: ${RESULTS#"$ROOT/"}"
 echo "Test data was left in the stack. Remove it with: loadtests/scripts/cleanup.sh"
 
-[[ "$INV_RC" -ne 0 ]] && exit 2
+[[ "$INV_RC" -eq 1 ]] && exit 2
 [[ "$K6_RC" -ne 0 || "$VERDICT_FAILS" -gt 0 ]] && exit 1
+# Nothing wrong was found, but some invariant could not be checked: not a pass.
+[[ "$INV_RC" -eq 4 ]] && exit 4
+[[ "$INV_RC" -ne 0 ]] && exit 3
 exit 0

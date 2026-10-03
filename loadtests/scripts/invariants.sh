@@ -46,16 +46,22 @@ order_db()     { docker exec taskflow-postgres-order psql -U postgres -d orderfl
 inventory_db() { docker exec taskflow-postgres-inventory psql -U postgres -d inventoryflow -tAqc "$1" 2>/dev/null | tr -d '[:space:]'; }
 
 FAILED=0
+UNKNOWN=0
 LINES=()
 
-record() { # name, ok(0/1), detail
+# status: 0 = holds, 1 = VIOLATED, 2 = could not be checked. The distinction matters: a
+# database that is out of connections after an overload cannot be queried, and "I could
+# not look" is not the same finding as "I looked and it is wrong".
+record() { # name, status(0/1/2), detail
   local mark="PASS"
-  if [[ "$2" -ne 0 ]]; then mark="FAIL"; FAILED=1; fi
+  if [[ "$2" -eq 1 ]]; then mark="FAIL"; FAILED=1; fi
+  if [[ "$2" -eq 2 ]]; then mark="????"; UNKNOWN=1; fi
   LINES+=("$(printf '  %-4s  %-34s %s' "$mark" "$1" "$3")")
 }
 
 evaluate() {
   FAILED=0
+  UNKNOWN=0
   LINES=()
 
   local total confirmed cancelled pending
@@ -66,27 +72,28 @@ evaluate() {
 
   # 1. Nothing is left waiting. Every order must have been confirmed or cancelled,
   #    by the saga or by its timeout.
-  if [[ -z "$pending" ]]; then record "no order left Pending" 1 "could not query the order database"
+  if [[ -z "$pending" ]]; then record "no order left Pending" 2 "could not query the order database (unreachable, or out of connections)"
   else record "no order left Pending" "$([[ "$pending" -eq 0 ]] && echo 0 || echo 1)" "$pending pending of $total created ($confirmed confirmed, $cancelled cancelled)"; fi
 
   # 2. No saga is still waiting for stock responses.
   local waiting
   waiting=$(order_db "select count(*) from \"OrderSagaStates\" where \"CurrentState\"='AwaitingStockReservation'")
-  record "no saga still awaiting stock" "$([[ "${waiting:-1}" -eq 0 ]] && echo 0 || echo 1)" "${waiting:-?} awaiting"
+  if [[ -z "$waiting" ]]; then record "no saga still awaiting stock" 2 "could not query the order database"
+  else record "no saga still awaiting stock" "$([[ "$waiting" -eq 0 ]] && echo 0 || echo 1)" "$waiting awaiting"; fi
 
   # 3. Stock is conserved: every unit that left stock belongs to a confirmed order.
   #    Cancelled orders must have given theirs back. A positive difference is stock
   #    that vanished (a reservation nothing released); a negative one is stock that
   #    appeared (something released twice).
   if [[ -n "$PRODUCTS" ]]; then
-    local entry product initial sold final expected diff n=0 bad=0 problems=""
+    local entry product initial sold final expected diff n=0 bad=0 unreadable=0 problems=""
     local total_sold=0
     for entry in ${PRODUCTS//,/ }; do
       product="${entry%%:*}"; initial="${entry##*:}"; n=$((n + 1))
       sold=$(order_db "select coalesce(sum(i.\"Quantity\"),0) from \"OrderItem\" i join \"Orders\" o on o.\"Id\"=i.\"OrderId\" where o.\"Status\"='Confirmed' and o.\"CreatedAtUtc\" >= '$START' and i.\"ProductId\"='$product'")
       final=$(inventory_db "select \"QuantityAvailable\" from \"InventoryItems\" where \"ProductId\"='$product'")
       if [[ -z "$sold" || -z "$final" ]]; then
-        bad=$((bad + 1)); problems+="${product:0:8}: unreadable; "
+        unreadable=$((unreadable + 1)); problems+="${product:0:8}: unreadable; "
         continue
       fi
       total_sold=$((total_sold + sold))
@@ -97,7 +104,11 @@ evaluate() {
         problems+="${product:0:8}: expected $expected found $final ($([[ $diff -gt 0 ]] && echo "$diff LOST" || echo "$((-diff)) CREATED")); "
       fi
     done
-    record "stock conserved (per product)" "$([[ "$bad" -eq 0 ]] && echo 0 || echo 1)" \
+    # A product that could not be read is unknown, not wrong; a wrong one wins over it.
+    local stock_status=0
+    [[ "$unreadable" -gt 0 ]] && stock_status=2
+    [[ "$bad" -gt 0 ]] && stock_status=1
+    record "stock conserved (per product)" "$stock_status" \
       "$n product(s), $total_sold units sold${problems:+, PROBLEMS: $problems}"
   fi
 
@@ -105,8 +116,12 @@ evaluate() {
   local order_outbox inventory_outbox
   order_outbox=$(order_db "select count(*) from \"OutboxMessage\"")
   inventory_outbox=$(inventory_db "select count(*) from \"OutboxMessage\"")
-  record "outbox drained" "$([[ "${order_outbox:-1}" -eq 0 && "${inventory_outbox:-1}" -eq 0 ]] && echo 0 || echo 1)" \
-    "order ${order_outbox:-?}, inventory ${inventory_outbox:-?} undelivered"
+  if [[ -z "$order_outbox" || -z "$inventory_outbox" ]]; then
+    record "outbox drained" 2 "order ${order_outbox:-?}, inventory ${inventory_outbox:-?} (a database could not be queried)"
+  else
+    record "outbox drained" "$([[ "$order_outbox" -eq 0 && "$inventory_outbox" -eq 0 ]] && echo 0 || echo 1)" \
+      "order $order_outbox, inventory $inventory_outbox undelivered"
+  fi
 
   # 5. No message exhausted its retries during THIS run and was parked in an _error
   #    queue. Nothing consumes those, so a message there is a failure that would
@@ -125,7 +140,7 @@ evaluate() {
 deadline=$(( $(date +%s) + WAIT ))
 while :; do
   evaluate
-  [[ "$FAILED" -eq 0 ]] && break
+  [[ "$FAILED" -eq 0 && "$UNKNOWN" -eq 0 ]] && break
   [[ "$(date +%s)" -ge "$deadline" ]] && break
   sleep 5
 done
@@ -134,5 +149,7 @@ echo
 echo "Invariants after the run:"
 printf '%s\n' "${LINES[@]}"
 echo
-if [[ "$FAILED" -eq 0 ]]; then echo "  All invariants hold."; else echo "  INVARIANTS VIOLATED."; fi
-exit "$FAILED"
+if [[ "$FAILED" -ne 0 ]]; then echo "  INVARIANTS VIOLATED."; exit 1; fi
+if [[ "$UNKNOWN" -ne 0 ]]; then echo "  INCONCLUSIVE: some invariants could not be checked (see ????). Nothing was found wrong, but nothing was proven either; re-run invariants.sh once the system is quiet."; exit 4; fi
+echo "  All invariants hold."
+exit 0

@@ -37,6 +37,19 @@ declare -A FAULT_ACTION=(
   [gateway-down]=stop
 )
 
+# How long after a fault ends it is fair to start judging recovery. Most dependencies are
+# back within seconds, but a RabbitMQ client that lost its broker reconnects on a GROWING
+# backoff (attempts 13, 17, 19 seconds apart after a 45 second outage), so checkouts resume
+# only about 25-30 seconds after the broker is back. Judging recovery 20 seconds after
+# the restore caught that tail and reported it as a failure. Longer outages mean longer
+# backoffs, so these are floors, not guarantees.
+declare -A FAULT_SETTLE_S=(
+  [rabbitmq-down]=60
+  [rabbitmq-hang]=60
+)
+
+fault_settle() { echo "${FAULT_SETTLE_S[$1]:-30}"; }
+
 fault_names() { printf '%s\n' "${!FAULT_CONTAINER[@]}" | sort; }
 
 fault_known() { [[ -n "${FAULT_CONTAINER[$1]:-}" ]]; }

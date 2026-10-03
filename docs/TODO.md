@@ -63,6 +63,14 @@ Fixed in two parts that only work together: the inventory outbox now runs at `RE
 **Potential risk — the saga's own transactions are still SERIALIZABLE, and they do conflict.**
 The same default applies to OrderService's saga endpoint. It is observed, not hypothetical: the integration suite logs `40001` from `order-service` (on `UPDATE "InboxState"`) in the tests that deliver several stock responses for one order. In those small tests every conflict was retried and succeeded, and a conflict there is narrower than the inventory one (per order, not per product), so it has **not** been shown to fail. But it is the same mechanism that failed 37 of 40 in InventoryService, with a different hot spot, and the saga has not been load-tested for it: a multi-item order whose responses arrive together is the case to try.
 
+*Update (stress run, ~600 iterations/s):* the saga did log 309 `40001` conflicts under overload, all absorbed by retry; every one of the 7,756 orders still reached Confirmed and stock was conserved. So it costs throughput under overload but has not been shown to lose or corrupt anything. Switching the saga endpoint to READ COMMITTED (as done for inventory) is not done and would need its own analysis.
+
+**Found (capacity limit, not corruption) — the order database runs out of connections under heavy load.**
+In the stress run, at ~600 iterations/s (~1,150 requests/s) Postgres for OrderService hit `max_connections` ("too many clients already"). Overload was invisible at HTTP level (0% request errors) but showed as stalled async checkouts (about half resolved during the step) and a backlog that took over 150 s to drain; afterwards all invariants held. Not addressed. Options, none implemented: cap each service's connection pool, put PgBouncer in front of Postgres, raise `max_connections` (more memory), or shed load at the gateway before the saga backs up. The stress report now fails a step on unresolved checkouts, not just HTTP errors.
+
+**Confirmed (behaviour, not a fault) — after a broker outage, checkouts resume 25–30 s after the broker is back.**
+Measured by the `rabbitmq-down` chaos test. A service that lost RabbitMQ reconnects on a growing backoff: after a 45 s outage InventoryService logged failed attempts at 13, 17 and 19 s apart, the last one just after the broker returned but while it was still booting, so the next attempt landed about 25–30 s after the restore. During that gap checkouts placed after the restore wait (up to ~12 s observed, then the saga timeout is 30 s in tests and 5 min by default). No data is lost: every invariant held across the outage, with the outbox holding the messages. A longer outage means a longer backoff, so the gap grows with it; it has not been measured beyond 45 s. The reconnect schedule is MassTransit's default and is not configured anywhere in this repo.
+
 ## Operational
 
 **Confirmed — no service applies EF migrations at startup.**

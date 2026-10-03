@@ -33,7 +33,7 @@ Run these from WSL or Linux (`docker compose up -d` in `deploy/` first). They on
 
 Results go to `loadtests/results/<profile>-<timestamp>/` (git-ignored): `k6.log`, the k6 JSON, `invariants.txt`, and for soaks a memory sample.
 
-Exit code: `0` all good, `1` a k6 threshold failed, `2` an invariant was violated, `3` the run could not be carried out.
+Exit code: `0` all good, `1` a k6 threshold failed, `2` an invariant was violated, `3` the run could not be carried out, `4` **inconclusive**: nothing was found wrong, but an invariant could not be checked (for example a database out of connections), so nothing was proven either.
 
 ## The invariants
 
@@ -47,16 +47,18 @@ Latency and error rate say how the system felt. They say nothing about whether i
 | Outbox drained | A committed message never reached the broker |
 | No **new** messages in `_error` queues | A message exhausted its retries during this run and nothing consumes those queues, so it would otherwise be silent. Compared with what was already there at the start |
 
-The system is eventually consistent, so the check keeps retrying for up to 150 seconds (`SETTLE_WAIT_S`) before declaring a failure. One that clears was just still in flight; one that persists is real.
+Each invariant is `PASS`, `FAIL`, or `????` (could not be queried). "I could not look" is reported as inconclusive, never as a violation.
+
+The system is eventually consistent, so the check keeps retrying for up to 150 seconds (`SETTLE_WAIT_S`; 600 for `stress`, whose backlog can take minutes to drain) before declaring a failure. One that clears was just still in flight; one that persists is real.
 
 ## Reading the results
 
 - **Thresholds are for this machine, not for production.** The defaults (`P95_BROWSE_MS=500` and so on, in `k6/lib/config.js`) describe a laptop running the whole stack *and* the load generator, sharing CPU. Use a run to compare before and after a change, or to find where something breaks relative to itself. Do not quote its numbers as capacity. Set thresholds from real traffic and SLOs before using a run to make a capacity claim.
 - **`load`**: any failure means the system cannot carry expected load. What "expected" is, is yours to say: set `VUS` from real numbers (concurrent users is roughly requests per second times average session think-time).
-- **`stress`**: read the by-step table. The report names the highest step that held (<2% failed, p95 <1s) and the first that did not. The arrival-rate executor keeps starting iterations whether or not the system keeps up, which is what real overload looks like; watch `DROPPED` iterations too. Then look at the invariants: a system that fails *cleanly* under overload and comes back is fine; one that corrupts data is not.
+- **`stress`**: read the by-step table. The report names the highest step that held (<2% failed, p95 <1s, at least 95% of checkouts confirmed) and the first that did not, with the reason. Checkouts matter because overload here is invisible at HTTP level: at ~600 iterations/s the order database ran out of connections (`max_connections`), every request still returned success, but only about half the checkouts resolved during the step and the backlog took over 150 s to drain. All orders were eventually confirmed and stock was conserved, so this is a capacity limit, not corruption. The arrival-rate executor keeps starting iterations whether or not the system keeps up, which is what real overload looks like; watch `DROPPED` iterations too. Then look at the invariants: a system that fails *cleanly* under overload and comes back is fine; one that corrupts data is not.
 - **`spike`**: the pass criteria apply to the baseline and the recovery, not the spike. Failing during a 10x jump is expected; not returning to normal afterwards is the finding.
-- **`soak`**: the report compares p95 in the first tenth of the run with the last tenth (`LOADTEST_VERDICT soak-latency-drift`) and lists memory per container, first vs last tenth. Memory growth is a **warning**, not a failure: a JIT or a cache warming up looks like a leak until you run longer. Use `--minutes 120` or more for a real soak.
-- **`chaos`**: the fault phase is deliberately unjudged (errors are expected while a dependency is down). Read *which* endpoints failed and how, and check that the baseline and recovery phases pass and the invariants hold.
+- **`soak`**: the report compares p95 in the first tenth of the run with the last tenth (`LOADTEST_VERDICT soak-latency-drift`) and lists memory per container. Memory is compared between the **40-50% mark and the last tenth**; the first 40% is ignored as warm-up. A first version compared the start with the end and flagged `order-api` as a +112% leak; its memory chart (93 MiB, up to 422, flat, then back to 280 after a garbage collection) was a runtime warming up, not a leak. Growth is a **warning**, not a failure: a short run cannot tell a slow leak from a slow plateau, so use `--minutes 120` or more for a real soak, and read `stats.csv` in the results folder when a warning appears.
+- **`chaos`**: the fault phase is deliberately unjudged (errors are expected while a dependency is down). Read *which* endpoints failed and how, and check that the baseline and recovery phases pass and the invariants hold. Recovery is judged only after a per-fault settle time (30 s, 60 s for the broker): a RabbitMQ client that lost its broker reconnects on a **growing backoff**, so after a 45 s outage checkouts resume roughly 25-30 s after the broker is back. Judging at 20 s caught that tail and called it a failure. Checkouts that begin in one phase and end in another are reported separately and counted in neither, so a fault cannot be blamed on the baseline.
 
 ### Faults (`--fault`)
 
@@ -75,7 +77,7 @@ Pass with `--env NAME=VALUE` (or export them). Defaults in parentheses.
 | `STEPS` (5,10,20,40,80,160), `STEP_S` (60), `MAX_VUS` (300) | stress | Iterations/second per step; seconds per step; VU ceiling |
 | `BASE_VUS` (5), `SPIKE_FACTOR` (10), `HOLD_S` (120) | spike | Calm level, multiple, seconds at the peak |
 | `SOAK_MINUTES` (30) | soak | Length (also `--minutes`) |
-| `BASELINE_S` (45), `FAULT_S` (60), `RECOVERY_S` (120), `SETTLE_S` (30) | chaos | Seconds per phase; unjudged period after the fault |
+| `BASELINE_S` (45), `FAULT_S` (60), `RECOVERY_S` (settle + 60), `SETTLE_S` (30; broker faults 60) | chaos | Seconds per phase; unjudged period after the fault |
 | `USERS` (10) | all | Users logged in once and shared between VUs |
 | `PRODUCTS` (5) | all | Products the load is spread across. **`PRODUCTS=1` puts every order on one inventory row** - a flash sale, and a deliberately harsh case (see below) |
 | `MIX_BROWSE` (0.7), `MIX_BASKET` (0.2) | all | Traffic mix; the remainder is checkout |

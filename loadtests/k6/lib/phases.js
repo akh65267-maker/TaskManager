@@ -33,6 +33,8 @@ export function observe(phases) {
     thresholds[`http_reqs{phase:${name}}`] = ['count>=0'];
     thresholds[`checkout_confirmed{phase:${name}}`] = ['rate>=0'];
   }
+  // Checkouts that began in one phase and ended in another (see journeys.js).
+  thresholds['checkout_confirmed{phase:straddle}'] = ['rate>=0'];
   for (const status of ['Confirmed', 'Cancelled', 'Pending']) {
     thresholds[`checkout_outcome{status:${status}}`] = ['count>=0'];
   }

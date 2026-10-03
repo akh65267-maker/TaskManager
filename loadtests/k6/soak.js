@@ -46,7 +46,7 @@ export default function (data) {
   if (exec.vu.iterationInScenario === 0 && exec.vu.idInTest === 1) {
     console.log(`LOADTEST_TRAFFIC_STARTED ${Date.now()}`);
   }
-  journey(data, { phase: phaseAt(phases) });
+  journey(data, () => phaseAt(phases));
 }
 
 export function handleSummary(data) {
