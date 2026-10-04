@@ -30,20 +30,36 @@ public class Order
         CreatedAtUtc = DateTimeOffset.UtcNow;
     }
 
-    public void Confirm()
+    /// <summary>Returns whether this call confirmed the order (false if it already was).</summary>
+    public bool Confirm()
     {
+        // Idempotent: confirming a confirmed order changes nothing. Asking for the opposite
+        // outcome is a real conflict, not a repeat, and still throws.
+        if (Status == OrderStatus.Confirmed)
+            return false;
+
         if (Status != OrderStatus.Pending)
             throw new InvalidOperationException($"Cannot confirm an order in status '{Status}'.");
 
         Status = OrderStatus.Confirmed;
+        return true;
     }
 
-    public void Cancel(string reason)
+    /// <summary>
+    /// Idempotent: cancelling a cancelled order changes nothing, and keeps the original reason.
+    /// Returns whether this call cancelled it, so a caller can skip side effects (releasing
+    /// stock) that belong to the call that really did.
+    /// </summary>
+    public bool Cancel(string reason)
     {
+        if (Status == OrderStatus.Cancelled)
+            return false;
+
         if (Status != OrderStatus.Pending)
             throw new InvalidOperationException($"Cannot cancel an order in status '{Status}'.");
 
         Status = OrderStatus.Cancelled;
         CancellationReason = reason;
+        return true;
     }
 }

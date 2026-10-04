@@ -4,6 +4,7 @@ using Contracts.Common;
 using Contracts.IntegrationEvents;
 using MassTransit;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using OrderService.Domain;
 
 namespace OrderService.Application.Sagas;
@@ -191,23 +192,41 @@ public class OrderSagaStateMachine : MassTransitStateMachine<OrderSagaState>
         if (order is null)
             return;
 
+        // Idempotent: if the order is already in the state this checkout would put it in
+        // (a redelivery after the order's own write committed), there is nothing to save,
+        // no stock to release a second time and nothing to count - the saga just finishes.
+        // The opposite state (confirmed order, failed checkout) still throws: that is a
+        // conflict worth a fault, not a repeat.
+        bool changed;
         if (saga.HasFailure)
         {
-            var items = JsonSerializer.Deserialize<List<OrderLineItem>>(saga.ItemsJson) ?? new List<OrderLineItem>();
-            var reservedProductIds = JsonSerializer.Deserialize<List<Guid>>(saga.ReservedProductIdsJson) ?? new List<Guid>();
+            changed = order.Cancel(saga.FailureReason ?? "Unable to reserve stock for one or more items.");
 
-            foreach (var productId in reservedProductIds)
+            if (changed)
             {
-                var item = items.FirstOrDefault(i => i.ProductId == productId);
-                if (item is not null)
-                    await context.Publish(new ReleaseStock(saga.CorrelationId, productId, item.Quantity));
-            }
+                var items = JsonSerializer.Deserialize<List<OrderLineItem>>(saga.ItemsJson) ?? new List<OrderLineItem>();
+                var reservedProductIds = JsonSerializer.Deserialize<List<Guid>>(saga.ReservedProductIdsJson) ?? new List<Guid>();
 
-            order.Cancel(saga.FailureReason ?? "Unable to reserve stock for one or more items.");
+                foreach (var productId in reservedProductIds)
+                {
+                    var item = items.FirstOrDefault(i => i.ProductId == productId);
+                    if (item is not null)
+                        await context.Publish(new ReleaseStock(saga.CorrelationId, productId, item.Quantity));
+                }
+            }
         }
         else
         {
-            order.Confirm();
+            changed = order.Confirm();
+        }
+
+        if (!changed)
+        {
+            provider.GetService<ILogger<OrderSagaStateMachine>>()?.LogWarning(
+                "Order {OrderId} was already {Status} when its checkout finalized; nothing to do",
+                order.Id,
+                order.Status);
+            return;
         }
 
         await repo.SaveChangesAsync();

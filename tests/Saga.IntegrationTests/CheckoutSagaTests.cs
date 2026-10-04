@@ -373,6 +373,101 @@ public class CheckoutSagaTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Finalizing a checkout whose order is already resolved. Reaching FinalizeAsync twice for
+    /// one order (a redelivery after the order's own write had committed) used to throw from
+    /// Order.Confirm(), fault the message and leave the saga stuck in AwaitingStockReservation
+    /// even though the order was done. Here the order is confirmed behind the saga's back
+    /// while InventoryService is down, then the replies arrive: the saga must simply finish.
+    /// </summary>
+    [Fact]
+    public async Task Checkout_WhenTheOrderIsAlreadyConfirmed_FinalizesTheSagaInsteadOfFaulting()
+    {
+        var productId = Guid.NewGuid();
+        await SeedInventoryAsync(productId, quantityAvailable: 10);
+        AuthenticateAs(Guid.NewGuid());
+        _faults.Clear();
+
+        await _inventoryHost!.StopAsync();
+        var orderId = await CreateOrderAsync(new OrderItemRequest(productId, 4, 9.99m));
+        await WaitUntilAsync(
+            async () => await SagaStateAsync(orderId) == "AwaitingStockReservation",
+            TimeSpan.FromSeconds(30), "the saga to start waiting for stock");
+
+        await SetOrderStatusAsync(orderId, "Confirmed", reason: null);
+
+        _inventoryHost.Dispose();
+        _inventoryHost = _createInventoryHost();
+        await _inventoryHost.StartAsync();
+
+        await WaitUntilAsync(
+            async () => await SagaStateAsync(orderId) is null || !_faults.IsEmpty,
+            TimeSpan.FromSeconds(60), "the saga to finalize (or fault)");
+
+        Assert.True(_faults.IsEmpty, $"finalizing faulted: {_faults.FirstOrDefault()}");
+        Assert.Null(await SagaStateAsync(orderId));
+        Assert.Equal(OrderStatus.Confirmed, (await WaitForResolutionAsync(orderId, timeoutSeconds: 5)).Status);
+        Assert.Equal(6, await GetInventoryQuantityAsync(productId));
+    }
+
+    /// <summary>
+    /// The same for a cancellation: the order was cancelled elsewhere, then the saga
+    /// finalizes with a failure. It must neither fault, nor overwrite the original reason,
+    /// nor publish its releases a second time - those belong to the finalize that actually
+    /// cancelled the order, and publishing them again would inflate stock.
+    /// </summary>
+    [Fact]
+    public async Task Checkout_WhenTheOrderIsAlreadyCancelled_FinalizesWithoutFaultingOrReleasingAgain()
+    {
+        var plentiful = Guid.NewGuid();
+        var scarce = Guid.NewGuid();
+        await SeedInventoryAsync(plentiful, quantityAvailable: 10);
+        await SeedInventoryAsync(scarce, quantityAvailable: 1);
+        AuthenticateAs(Guid.NewGuid());
+        _faults.Clear();
+
+        await _inventoryHost!.StopAsync();
+        var orderId = await CreateOrderAsync(
+            new OrderItemRequest(plentiful, 3, 9.99m),
+            new OrderItemRequest(scarce, 5, 4.99m));
+        await WaitUntilAsync(
+            async () => await SagaStateAsync(orderId) == "AwaitingStockReservation",
+            TimeSpan.FromSeconds(30), "the saga to start waiting for stock");
+
+        await SetOrderStatusAsync(orderId, "Cancelled", reason: "Cancelled before the saga finished.");
+
+        _inventoryHost.Dispose();
+        _inventoryHost = _createInventoryHost();
+        await _inventoryHost.StartAsync();
+
+        await WaitUntilAsync(
+            async () => await SagaStateAsync(orderId) is null || !_faults.IsEmpty,
+            TimeSpan.FromSeconds(60), "the saga to finalize (or fault)");
+
+        Assert.True(_faults.IsEmpty, $"finalizing faulted: {_faults.FirstOrDefault()}");
+        Assert.Null(await SagaStateAsync(orderId));
+
+        var order = await WaitForResolutionAsync(orderId, timeoutSeconds: 5);
+        Assert.Equal(OrderStatus.Cancelled, order.Status);
+        Assert.Equal("Cancelled before the saga finished.", order.CancellationReason);
+
+        // The plentiful item was reserved (10 - 3) and nothing released it again.
+        Assert.Equal(7, await GetInventoryQuantityAsync(plentiful));
+    }
+
+    private async Task SetOrderStatusAsync(Guid orderId, string status, string? reason)
+    {
+        await using var connection = new NpgsqlConnection(_orderDb.GetConnectionString());
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(
+            "UPDATE \"Orders\" SET \"Status\" = @status, \"CancellationReason\" = @reason WHERE \"Id\" = @id",
+            connection);
+        command.Parameters.AddWithValue("status", status);
+        command.Parameters.AddWithValue("reason", (object?)reason ?? DBNull.Value);
+        command.Parameters.AddWithValue("id", orderId);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
+    /// <summary>
     /// The race behind the "first order after a restart never confirms" stall.
     /// The saga publishes ReserveStock while its own transaction is still open, and
     /// only afterwards INSERTs and commits its row. If InventoryService answers
