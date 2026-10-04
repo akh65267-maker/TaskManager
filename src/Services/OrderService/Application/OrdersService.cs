@@ -1,6 +1,7 @@
 using Contracts.Common;
 using Contracts.IntegrationEvents;
 using MassTransit;
+using OrderService.Application.Catalog;
 using OrderService.Application.Orders;
 using OrderService.Domain;
 
@@ -9,12 +10,18 @@ namespace OrderService.Application;
 public class OrdersService
 {
     private readonly IOrderRepository _repo;
+    private readonly IProductPriceProvider _prices;
     private readonly IPublishEndpoint _publishEndpoint;
     private readonly ILogger<OrdersService> _logger;
 
-    public OrdersService(IOrderRepository repo, IPublishEndpoint publishEndpoint, ILogger<OrdersService> logger)
+    public OrdersService(
+        IOrderRepository repo,
+        IProductPriceProvider prices,
+        IPublishEndpoint publishEndpoint,
+        ILogger<OrdersService> logger)
     {
         _repo = repo;
+        _prices = prices;
         _publishEndpoint = publishEndpoint;
         _logger = logger;
     }
@@ -39,7 +46,11 @@ public class OrdersService
             .Select(i => new OrderItem(i.ProductId, i.Quantity, i.UnitPrice))
             .ToList();
 
+        // Shape first (no items, bad quantity): no point asking the catalog about a request
+        // that is invalid anyway.
         var order = new Order(userId, items);
+
+        await EnsurePricesMatchCatalogAsync(order, cancellationToken);
 
         await _repo.AddAsync(order, cancellationToken);
 
@@ -64,6 +75,25 @@ public class OrdersService
             order.TotalAmount);
 
         return order.Id;
+    }
+
+    // The caller sends a price per line; it is a claim to check, never a value to store. A
+    // price that disagrees with the catalog is refused rather than silently replaced, so
+    // nobody is charged a different amount from the one they were shown.
+    private async Task EnsurePricesMatchCatalogAsync(Order order, CancellationToken cancellationToken)
+    {
+        var catalog = await _prices.GetPricesAsync(
+            order.Items.Select(i => i.ProductId).Distinct().ToList(),
+            cancellationToken);
+
+        foreach (var item in order.Items)
+        {
+            if (!catalog.TryGetValue(item.ProductId, out var current))
+                throw OrderRejectedException.UnknownProduct(item.ProductId);
+
+            if (item.UnitPrice != current)
+                throw OrderRejectedException.PriceChanged(item.ProductId, item.UnitPrice, current);
+        }
     }
 
     private static OrderDto ToDto(Order order)

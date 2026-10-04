@@ -6,10 +6,12 @@ using Microsoft.IdentityModel.Tokens;
 using Observability;
 using OrderService;
 using OrderService.Application;
+using OrderService.Application.Catalog;
 using OrderService.Application.Orders;
 using OrderService.Application.Sagas;
 using OrderService.Domain;
 using OrderService.Infrastructure;
+using OrderService.Infrastructure.Catalog;
 using OrderService.Infrastructure.Observability;
 using OrderService.Infrastructure.Persistence;
 using Serilog;
@@ -42,6 +44,16 @@ builder.Services.AddHealthChecks()
 
 builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 builder.Services.AddScoped<OrdersService>();
+
+// Where prices come from. Required: an order service that cannot price an order must not
+// start quietly and then trust the caller instead.
+var catalogBaseUrl = builder.Configuration["Catalog:BaseUrl"]
+    ?? throw new InvalidOperationException("Catalog:BaseUrl is missing.");
+builder.Services.AddHttpClient<IProductPriceProvider, CatalogClient>(client =>
+{
+    client.BaseAddress = new Uri(catalogBaseUrl.TrimEnd('/') + "/");
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
 
 builder.Services.AddSingleton<OrderMetrics>();
 builder.Services.AddHostedService<OrderMetricsCollector>();

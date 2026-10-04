@@ -13,6 +13,7 @@ using Contracts.IntegrationEvents;
 using MassTransit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,6 +21,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
+using OrderService.Application.Catalog;
 using OrderService.Application.Orders;
 using OrderService.Domain;
 using OrderService.Infrastructure.Persistence;
@@ -63,6 +65,10 @@ public class CheckoutSagaTests : IAsyncLifetime
     private readonly RabbitMqContainer _rabbitMq = new RabbitMqBuilder().WithImage("rabbitmq:3-management").Build();
 
     private WebApplicationFactory<Program>? _orderFactory;
+
+    // The products CatalogService "has" and their prices. OrderService checks every order against
+    // the catalog, so a test that orders something has to put it here first (CreateOrderAsync does).
+    private readonly ConcurrentDictionary<Guid, decimal> _catalogPrices = new();
     private IHost? _inventoryHost;
     private Func<IHost> _createInventoryHost = default!;
     private HttpClient _orderClient = default!;
@@ -121,6 +127,11 @@ public class CheckoutSagaTests : IAsyncLifetime
             builder.UseSetting("RabbitMq:Port", rabbitUri.Port.ToString());
             builder.UseSetting("RabbitMq:Username", rabbitUsername);
             builder.UseSetting("RabbitMq:Password", rabbitPassword);
+
+            // Required at startup, but never dialled: the catalog is replaced below.
+            builder.UseSetting("Catalog:BaseUrl", "http://catalog.invalid");
+            builder.ConfigureTestServices(services =>
+                services.AddSingleton<IProductPriceProvider>(new InMemoryCatalog(_catalogPrices)));
 
             // The production default is minutes, which no test can wait for.
             // 20s is still ~20x a healthy checkout - both of the other tests
@@ -622,8 +633,54 @@ public class CheckoutSagaTests : IAsyncLifetime
         _orderClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", rawToken);
     }
 
+    [Fact]
+    public async Task Checkout_WithAPriceThatIsNotTheCatalogPrice_IsRefusedWith409AndCreatesNoOrder()
+    {
+        AuthenticateAs(Guid.NewGuid());
+        var productId = Guid.NewGuid();
+        _catalogPrices[productId] = 9.99m;
+
+        // The caller claims the item costs a cent.
+        var response = await _orderClient.PostAsJsonAsync(
+            "/orders", new CreateOrderRequest(new[] { new OrderItemRequest(productId, 1, 0.01m) }));
+
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Contains("9.99", await response.Content.ReadAsStringAsync());
+        Assert.Empty(await ListMyOrdersAsync());
+    }
+
+    [Fact]
+    public async Task Checkout_WithAProductTheCatalogDoesNotKnow_IsRefusedWith422AndCreatesNoOrder()
+    {
+        AuthenticateAs(Guid.NewGuid());
+        var response = await _orderClient.PostAsJsonAsync(
+            "/orders", new CreateOrderRequest(new[] { new OrderItemRequest(Guid.NewGuid(), 1, 9.99m) }));
+
+        Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Empty(await ListMyOrdersAsync());
+    }
+
+    private async Task<JsonElement[]> ListMyOrdersAsync()
+    {
+        var response = await _orderClient.GetAsync("/orders");
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<JsonElement[]>())!;
+    }
+
+    // Stands in for CatalogService: prices for the products a test has registered.
+    private sealed class InMemoryCatalog(ConcurrentDictionary<Guid, decimal> prices) : IProductPriceProvider
+    {
+        public Task<IReadOnlyDictionary<Guid, decimal>> GetPricesAsync(
+            IReadOnlyCollection<Guid> productIds, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<Guid, decimal>>(
+                productIds.Where(prices.ContainsKey).ToDictionary(id => id, id => prices[id]));
+    }
+
     private async Task<Guid> CreateOrderAsync(params OrderItemRequest[] items)
     {
+        foreach (var item in items)
+            _catalogPrices[item.ProductId] = item.UnitPrice;
+
         var response = await _orderClient.PostAsJsonAsync("/orders", new CreateOrderRequest(items));
         response.EnsureSuccessStatusCode();
 

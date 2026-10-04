@@ -523,7 +523,10 @@ var serviceDefinitions = {
   'order-api': {
     connectionName: 'OrderDatabase'
     usesBus: true
-    extraEnv: []
+    extraEnv: [
+      // Orders are priced from the catalog (internal ingress, like the gateway's route to it).
+      { name: 'Catalog__BaseUrl', value: 'http://catalog-api' }
+    ]
     extraSecrets: []
   }
 }

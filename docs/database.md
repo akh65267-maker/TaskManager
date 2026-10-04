@@ -16,7 +16,7 @@ Each Postgres service has its own named volume; Redis has **none** — basket da
 ## Ownership boundaries that matter
 
 - `ProductId` is the join key between Catalog (product definition + price) and Inventory (stock), but it is **only a convention**. Creating a product does not create an inventory record, and `ReserveStock` for an unknown product is answered with `StockReservationFailed("No inventory record for this product.")` rather than an error.
-- Order line items store their **own copy of `UnitPrice`**, supplied by the client at checkout. Orders are therefore immune to later catalog price changes, but also unvalidated against the catalog (see [TODO.md](TODO.md)).
+- Order line items store their **own copy of `UnitPrice`**, confirmed against the catalog when the order is placed (see [services.md](services.md)). Orders are therefore immune to later catalog price changes.
 - `UserId` appears in Basket, Order and the saga, with no foreign key to UserService. Deleting a user (no endpoint exists) would orphan those rows.
 
 ## Schemas

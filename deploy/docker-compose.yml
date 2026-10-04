@@ -169,6 +169,8 @@ services:
       Jwt__Key: ${JWT_KEY}
       Jwt__Issuer: ${JWT_ISSUER}
       Jwt__Audience: ${JWT_AUDIENCE}
+      # Orders are priced from the catalog, not from the caller.
+      Catalog__BaseUrl: http://catalog-api:8080
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
     ports:

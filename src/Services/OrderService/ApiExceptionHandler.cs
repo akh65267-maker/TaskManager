@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using OrderService.Application.Orders;
 
 namespace OrderService;
 
@@ -10,6 +11,20 @@ public class ApiExceptionHandler : IExceptionHandler
         Exception exception,
         CancellationToken cancellationToken)
     {
+        if (exception is OrderRejectedException rejected)
+        {
+            httpContext.Response.StatusCode = rejected.StatusCode;
+
+            await httpContext.Response.WriteAsJsonAsync(new ProblemDetails
+            {
+                Status = rejected.StatusCode,
+                Title = rejected.Title,
+                Detail = rejected.Message
+            }, cancellationToken);
+
+            return true;
+        }
+
         if (exception is not ArgumentException argumentException)
             return false;
 

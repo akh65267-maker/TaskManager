@@ -6,11 +6,13 @@ Orchestrated by `OrderSagaStateMachine` in OrderService. One saga instance per o
 
 ```text
 Client
-  │ POST /orders  (Bearer JWT; items incl. client-supplied UnitPrice)
+  │ POST /orders  (Bearer JWT; items incl. the UnitPrice the client was shown)
   ▼
 ApiGateway  →  OrderService.OrdersService.CreateAsync
   │
   ├── new Order(userId, items)          → Status = Pending
+  ├── check every UnitPrice against CatalogService (GET /products/{id}):
+  │     unknown product → 422, price differs → 409, catalog unreachable → 503 — nothing is stored
   ├── Publish(OrderSubmitted)           → buffered in outbox
   └── SaveChangesAsync                  → order row + outbox msg, ONE transaction
   │
