@@ -27,7 +27,7 @@ Each Postgres service has its own named volume; Redis has **none** — basket da
 - MassTransit `InboxState`, `OutboxState`, `OutboxMessage`.
 
 **InventoryDbContext** (`inventoryflow`)
-- `InventoryItems` — **PK is `ProductId`** (no surrogate key), plus required `QuantityAvailable`. No reserved-quantity column and no row-version / concurrency token. Safety under concurrent reservation comes from a row lock: the consumers read the row with `SELECT … FOR UPDATE` inside a `READ COMMITTED` transaction, so concurrent writers queue on the lock rather than failing (the previous SERIALIZABLE default made all but one fail with `40001`). The restock endpoint does not take that lock; see [TODO.md](TODO.md).
+- `InventoryItems` — **PK is `ProductId`** (no surrogate key), plus required `QuantityAvailable`. No reserved-quantity column and no row-version / concurrency token. Safety under concurrent reservation comes from a row lock: the consumers read the row with `SELECT … FOR UPDATE` inside a `READ COMMITTED` transaction, so concurrent writers queue on the lock rather than failing (the previous SERIALIZABLE default made all but one fail with `40001`). The restock endpoint takes the same lock inside its own transaction, so it queues with them too.
 - MassTransit `InboxState`, `OutboxState`, `OutboxMessage`.
 
 **UserDbContext** (`userflow`) — users plus the MassTransit outbox tables (outbox only; no consumers).

@@ -46,12 +46,23 @@ public class InventoryItemsService
 
     public async Task<InventoryItemDto?> RestockAsync(Guid productId, int quantity, CancellationToken cancellationToken = default)
     {
-        var item = await _repo.GetByProductIdAsync(productId, cancellationToken);
+        // Read-modify-write under the row lock, inside a transaction. A plain read here lets a
+        // reservation that commits between the read and the write be overwritten: stock then
+        // rises by the restock plus whatever that reservation had taken. The reserve and
+        // release consumers take the same lock, so all three writers queue behind each other.
+        var item = await _repo.InTransactionAsync(async () =>
+        {
+            var locked = await _repo.GetByProductIdForUpdateAsync(productId, cancellationToken);
+            if (locked is null)
+                return null;
+
+            locked.Restock(quantity);
+            await _repo.SaveChangesAsync(cancellationToken);
+            return locked;
+        }, cancellationToken);
+
         if (item is null)
             return null;
-
-        item.Restock(quantity);
-        await _repo.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
             "Restocked product {ProductId} by {Quantity}, now {NewQuantity}",

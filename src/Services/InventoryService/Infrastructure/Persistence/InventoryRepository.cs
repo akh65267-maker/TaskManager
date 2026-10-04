@@ -39,6 +39,18 @@ public class InventoryRepository : IInventoryRepository
         return rows.SingleOrDefault();
     }
 
+    public async Task<T> InTransactionAsync<T>(Func<Task<T>> work, CancellationToken cancellationToken = default)
+    {
+        // No execution strategy to wrap this in: Program.cs deliberately does not enable
+        // EnableRetryOnFailure, which does not support user-initiated transactions.
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+        var result = await work();
+
+        await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
     public async Task<bool> ExistsAsync(Guid productId, CancellationToken cancellationToken = default)
     {
         return await _db.InventoryItems

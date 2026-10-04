@@ -19,6 +19,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 using OrderService.Application.Catalog;
@@ -35,6 +36,7 @@ using InventoryRepository = InventoryAlias::InventoryService.Infrastructure.Pers
 using ReserveStockConsumer = InventoryAlias::InventoryService.Application.Consumers.ReserveStockConsumer;
 using ReleaseStockConsumer = InventoryAlias::InventoryService.Application.Consumers.ReleaseStockConsumer;
 using InventoryOutbox = InventoryAlias::InventoryService.Infrastructure.Messaging.InventoryOutbox;
+using InventoryItemsService = InventoryAlias::InventoryService.Application.InventoryItemsService;
 
 namespace Saga.IntegrationTests;
 
@@ -494,6 +496,45 @@ public class CheckoutSagaTests : IAsyncLifetime
 
         Assert.True(_faults.IsEmpty, $"{_faults.Count} reservation(s) failed: {_faults.FirstOrDefault()}");
         Assert.Equal(1000 - reservations, stock);
+    }
+
+    /// <summary>
+    /// A restock racing a reservation. The reservation has taken the row lock and not yet
+    /// committed (the state every in-flight reservation is in). A restock that reads the
+    /// quantity without taking that lock reads the old value, then overwrites the
+    /// reservation's decrement once the lock frees: stock rises by the restock <i>plus</i>
+    /// whatever the reservation had taken, and the order that reserved it is still confirmed.
+    /// Deterministic, because the reservation is held open by hand rather than by timing luck.
+    /// </summary>
+    [Fact]
+    public async Task Restock_WhileAReservationIsInFlight_DoesNotOverwriteIt()
+    {
+        var productId = Guid.NewGuid();
+        await SeedInventoryAsync(productId, quantityAvailable: 10);
+
+        // The reservation: lock the row, take 4, but do not commit yet.
+        using var reserveScope = _inventoryHost!.Services.CreateScope();
+        var reserveDb = reserveScope.ServiceProvider.GetRequiredService<InventoryDbContext>();
+        await using var reservation = await reserveDb.Database.BeginTransactionAsync();
+        var held = await new InventoryRepository(reserveDb).GetByProductIdForUpdateAsync(productId);
+        held!.Reserve(4);
+        await reserveDb.SaveChangesAsync();
+
+        // The restock starts while that is open, on its own connection.
+        using var restockScope = _inventoryHost.Services.CreateScope();
+        var restockDb = restockScope.ServiceProvider.GetRequiredService<InventoryDbContext>();
+        var service = new InventoryItemsService(
+            new InventoryRepository(restockDb), NullLogger<InventoryItemsService>.Instance);
+        var restock = service.RestockAsync(productId, 5);
+
+        // Give it time to do whatever it does before it has to wait for the lock.
+        await Task.Delay(750);
+        Assert.False(restock.IsCompleted, "the restock should be waiting for the reservation's row lock");
+
+        await reservation.CommitAsync();
+        await restock;
+
+        Assert.Equal(10 - 4 + 5, await GetInventoryQuantityAsync(productId));
     }
 
     /// <summary>
