@@ -31,7 +31,7 @@ Run these from WSL or Linux (`docker compose up -d` in `deploy/` first). They on
 5. For `chaos`, breaks a dependency on a timeline, then restores it.
 6. Waits for the system to settle and checks the **invariants** below.
 
-Results go to `loadtests/results/<profile>-<timestamp>/` (git-ignored): `k6.log`, the k6 JSON, `invariants.txt`, and for soaks a memory sample.
+Results go to `loadtests/results/<profile>-<timestamp>/` (git-ignored): `k6.log`, the k6 JSON, `invariants.txt`, `connections.csv` / `connections.txt` (each database's open connections against its `max_connections`, every 3 s, with a peak summary), and for soaks a memory sample. A `REFUSED` connection sample means the database could not be queried at all, usually because it was out of connections (it can also mean the host was overloaded).
 
 Exit code: `0` all good, `1` a k6 threshold failed, `2` an invariant was violated, `3` the run could not be carried out, `4` **inconclusive**: nothing was found wrong, but an invariant could not be checked (for example a database out of connections), so nothing was proven either.
 
@@ -74,7 +74,7 @@ Pass with `--env NAME=VALUE` (or export them). Defaults in parentheses.
 |---|---|---|
 | `VUS` (20; soak/chaos 10) | load, soak, chaos | Concurrent shoppers |
 | `HOLD`, `RAMP` (3m, 1m) | load | Steady period; ramp up/down |
-| `STEPS` (5,10,20,40,80,160), `STEP_S` (60), `MAX_VUS` (300) | stress | Iterations/second per step; seconds per step; VU ceiling |
+| `STEPS` (5,10,20,40,80,160), `STEP_S` (60), `MAX_VUS` (300) | stress | Iterations/second per step; seconds per step; VU ceiling. **At several hundred iterations/s raise `MAX_VUS` (1200 for 600/s)**: at 300 the generator runs out of VUs, drops iterations (the report says `DROPPED`) and the system never receives the load you asked for, which is how one run reported "every step held" while the same steps with more VUs exhausted the database |
 | `BASE_VUS` (5), `SPIKE_FACTOR` (10), `HOLD_S` (120) | spike | Calm level, multiple, seconds at the peak |
 | `SOAK_MINUTES` (30) | soak | Length (also `--minutes`) |
 | `BASELINE_S` (45), `FAULT_S` (60), `RECOVERY_S` (settle + 60), `SETTLE_S` (30; broker faults 60) | chaos | Seconds per phase; unjudged period after the fault |

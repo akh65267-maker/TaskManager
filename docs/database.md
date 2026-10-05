@@ -36,6 +36,20 @@ Each Postgres service has its own named volume; Redis has **none** — basket da
 
 **Redis (Basket)** — one string key per user, `basket:{userId}`, holding the whole `Basket` object as JSON. No TTL, no secondary indexes.
 
+## Connection pools
+
+Every service caps its Npgsql pool with `Maximum Pool Size` in the connection string (`deploy/docker-compose.yml`; `postgresMaxPoolSize` in the Azure template). Npgsql's default is 100, which equals Postgres's default `max_connections` of 100, so one busy service could take every slot and leave nothing for its own background work, monitoring or an admin. Local defaults: order 80, inventory 30, catalog 30, users 20, each overridable (`ORDER_DB_POOL_SIZE` and so on). Sizing rule: pool x replicas, summed over the services that share a server, below `max_connections` with headroom.
+
+**The cap is a trade, not a free fix.** Measured with the stress profile (`STEPS=100,200,300,400,600 MAX_VUS=1200`) on the order service:
+
+| Order pool | Highest step that held | Order DB connections, peak | Result |
+|---|---|---|---|
+| 100 (default) | 400 it/s | 100 of 100, monitoring refused for ~4 min | stalls above 400; all orders eventually confirmed |
+| 80 | 300 it/s | 82 | invariants hold; `rate-400` 68% of checkouts confirmed |
+| 40 | 300 it/s | 42 | invariants hold; `rate-400` 50% |
+
+Single runs, so read the direction, not the decimals. Throughput follows the connections the service may use. At peak, most of them were *idle in transaction* (31 at pool 80), not running queries (25): connections are held by transactions that are waiting, and shortening that wait (what the saga and outbox transactions block on) is the real capacity lever, not the pool size. The first capped run was invalid for a different reason: the order Postgres crashed during it (see [TODO.md](TODO.md)).
+
 ## Migrations
 
 EF Core migrations are committed for Catalog, Inventory, Order, User and Task under each service's `Migrations/` folder.

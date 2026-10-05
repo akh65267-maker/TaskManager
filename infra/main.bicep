@@ -70,6 +70,10 @@ param postgresAdminLogin string = 'tmadmin'
 @description('Npgsql options appended to every connection string. Require encrypts without verifying the server certificate; tighten to VerifyFull once the CA chain is confirmed.')
 param postgresConnectionOptions string = 'SSL Mode=Require;Trust Server Certificate=true'
 
+@description('Npgsql Maximum Pool Size for every service (the Npgsql default is 100, which one service can use up on its own). Size it so that pool x replicas, summed over the services that share a server, stays below the server's max_connections with headroom. A pool below what a service needs under load slows it down instead of protecting it: locally the order service held about 80 connections at 500 requests/s, and capping it at 40 cut the sustainable rate by a quarter. Not yet measured on Azure.')
+@minValue(5)
+param postgresMaxPoolSize int = 50
+
 param redisSkuName string = 'Balanced_B0'
 param redisPersistence bool = false
 
@@ -406,7 +410,7 @@ resource databaseConnectionSecrets 'Microsoft.KeyVault/vaults/secrets@2024-11-01
     parent: vault
     name: 'conn-${toLower(database.connectionName)}'
     properties: {
-      value: 'Host=${postgres[postgresTopology == 'shared' ? 0 : i].outputs.fqdn};Port=5432;Database=${database.name};Username=${postgresAdminLogin};Password=${postgresAdminPassword};${postgresConnectionOptions}'
+      value: 'Host=${postgres[postgresTopology == 'shared' ? 0 : i].outputs.fqdn};Port=5432;Database=${database.name};Username=${postgresAdminLogin};Password=${postgresAdminPassword};Maximum Pool Size=${postgresMaxPoolSize};${postgresConnectionOptions}'
     }
     dependsOn: [keyVault]
   }

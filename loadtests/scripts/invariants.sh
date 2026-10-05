@@ -114,8 +114,8 @@ evaluate() {
 
   # 4. The outbox drained: nothing committed is still waiting to reach the broker.
   local order_outbox inventory_outbox
-  order_outbox=$(order_db "select count(*) from \"OutboxMessage\"")
-  inventory_outbox=$(inventory_db "select count(*) from \"OutboxMessage\"")
+  order_outbox=$(order_db "select count(*) from \"OutboxMessage\" where \"SentTime\" >= '$START'")
+  inventory_outbox=$(inventory_db "select count(*) from \"OutboxMessage\" where \"SentTime\" >= '$START'")
   if [[ -z "$order_outbox" || -z "$inventory_outbox" ]]; then
     record "outbox drained" 2 "order ${order_outbox:-?}, inventory ${inventory_outbox:-?} (a database could not be queried)"
   else

@@ -166,6 +166,7 @@ The template makes prod deployable. Before relying on it:
 - [ ] Put a real frontend origin into `prod.bicepparam`, and host the frontend.
 - [ ] Add Alertmanager (or Azure Monitor alerts) so the checkout alerts notify someone.
 - [ ] Per-service Postgres roles instead of the admin login.
+- [ ] Size `postgresMaxPoolSize` (default 50, not measured on Azure) against the server SKU: pool x replicas, summed over the services sharing a server, must stay below its `max_connections` with headroom.
 - [ ] Tighten `postgresConnectionOptions` to `SSL Mode=VerifyFull` once the CA chain is confirmed.
 - [ ] Confirm every item under *Not verified* on staging first.
 - [ ] Review SKUs and cost in the Azure pricing calculator; this repository states no prices.

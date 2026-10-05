@@ -127,7 +127,7 @@ COMPOSE_TEST=(docker compose -f "$ROOT/deploy/docker-compose.yml" -f "$SCRIPT_DI
 # ── the stack: short timeout for the run, restored afterwards ────────────────
 
 OVERRIDE_APPLIED=false
-SAMPLER_PID="" TAIL_PID="" K6_PID="" HEARTBEAT_PID=""
+SAMPLER_PID="" CONN_SAMPLER_PID="" TAIL_PID="" K6_PID="" HEARTBEAT_PID=""
 
 wait_for_url() {
   local url="$1" seconds="$2" waited=0
@@ -145,6 +145,7 @@ restore_stack() {
   trap - EXIT INT TERM
   [[ -n "$TAIL_PID" ]] && kill "$TAIL_PID" 2>/dev/null
   [[ -n "$SAMPLER_PID" ]] && kill "$SAMPLER_PID" 2>/dev/null
+  [[ -n "$CONN_SAMPLER_PID" ]] && kill "$CONN_SAMPLER_PID" 2>/dev/null
   [[ -n "$HEARTBEAT_PID" ]] && kill "$HEARTBEAT_PID" 2>/dev/null
   docker rm -f loadtest-k6 >/dev/null 2>&1
   fault_restore_all
@@ -244,10 +245,54 @@ memory_report() {
         last /= k
         growth = mid > 0 ? (last - mid) / mid * 100 : 0
         flag = (growth > 50 && last - mid > 50) ? "  <-- WARN: still growing" : ""
-        printf "  %-30s %8.0f MiB -> %8.0f MiB  (%+5.0f%%)%s
-", name, mid, last, growth, flag
+        printf "  %-30s %8.0f MiB -> %8.0f MiB  (%+5.0f%%)%s\n", name, mid, last, growth, flag
       }
     }' "$RESULTS/stats.csv" | sort
+}
+
+# Connections per database against its max_connections, every few seconds. An overloaded
+# service shows up here first: the order database ran out of connections in a stress run
+# while every HTTP request still succeeded, so nothing in the k6 numbers said so. Queried as
+# the superuser, whose reserved slots still answer when ordinary clients are refused; a
+# sample that fails anyway is recorded as refused (-1) rather than skipped.
+DB_SAMPLE=(order:orderflow inventory:inventoryflow catalog:catalogflow users:userflow)
+
+start_conn_sampler() {
+  (
+    while :; do
+      t="$(date +%s)"
+      for pair in "${DB_SAMPLE[@]}"; do
+        c="${pair%%:*}"; d="${pair##*:}"
+        row="$(docker exec "taskflow-postgres-$c" psql -U postgres -d "$d" -tAF, -c           "select count(*), count(*) filter (where state = 'active'), count(*) filter (where state like 'idle in transaction%'), current_setting('max_connections') from pg_stat_activity where datname = '$d'" 2>/dev/null)"
+        echo "$t,$c,${row:--1,-1,-1,-1}" >> "$RESULTS/connections.csv"
+      done
+      sleep 3
+    done
+  ) &
+  CONN_SAMPLER_PID=$!
+}
+
+# Peak connections per database, as a share of its limit, and how long it spent near it.
+# Running out is the failure; coming close is the warning.
+connections_report() {
+  [[ -s "$RESULTS/connections.csv" ]] || return 0
+  echo
+  echo "Database connections (peak vs max_connections; samples every 3 s):"
+  awk -F, '
+    { db = $2; n[db]++
+      if ($3 < 0) { refused[db]++; next }
+      if ($3 > peak[db]) peak[db] = $3
+      if ($4 > act[db]) act[db] = $4
+      if ($5 > itx[db]) itx[db] = $5
+      max[db] = $6
+      if ($3 >= $6 * 0.9) near[db]++ }
+    END {
+      for (db in n) {
+        pct = max[db] > 0 ? peak[db] / max[db] * 100 : 0
+        flag = (refused[db] > 0) ? "  <-- REFUSED " refused[db] " sample(s)" : (pct >= 90 ? "  <-- WARN: within 10% of the limit" : "")
+        printf "  %-10s peak %3d of %3d (%3.0f%%)   peak active %3d   peak idle-in-transaction %3d   near limit %3d s%s\n", db, peak[db], max[db], pct, act[db], itx[db], near[db] * 3, flag
+      }
+    }' "$RESULTS/connections.csv" | sort
 }
 
 # ── run k6 ───────────────────────────────────────────────────────────────────
@@ -267,6 +312,7 @@ run_k6() {
 
 info "profile: $PROFILE${FAULT:+ ($FAULT)}   k6: $K6_IMAGE   results: ${RESULTS#"$ROOT/"}"
 start_sampler
+start_conn_sampler
 
 # k6 runs with --quiet (its per-second progress lines would fill the log on a long run),
 # so say something now and then so a soak does not look hung.
@@ -338,6 +384,9 @@ if $INVARIANTS; then
     --errors-before "$ERRORS_BEFORE" --wait "$SETTLE" | tee "$RESULTS/invariants.txt"
   INV_RC=${PIPESTATUS[0]}
 fi
+
+kill "$CONN_SAMPLER_PID" 2>/dev/null; CONN_SAMPLER_PID=""
+connections_report | tee "$RESULTS/connections.txt"
 
 [[ "$PROFILE" == "soak" ]] && memory_report | tee "$RESULTS/memory.txt"
 

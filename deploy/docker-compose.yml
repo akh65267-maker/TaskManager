@@ -61,7 +61,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__UserDatabase: Host=postgres-users;Port=5432;Database=userflow;Username=postgres;Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__UserDatabase: Host=postgres-users;Port=5432;Database=userflow;Username=postgres;Password=${POSTGRES_PASSWORD};Maximum Pool Size=${USER_DB_POOL_SIZE:-20}
       RabbitMq__Host: rabbitmq
       RabbitMq__Username: ${RABBITMQ_USER}
       RabbitMq__Password: ${RABBITMQ_PASSWORD}
@@ -91,7 +91,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__CatalogDatabase: Host=postgres-catalog;Port=5432;Database=catalogflow;Username=postgres;Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__CatalogDatabase: Host=postgres-catalog;Port=5432;Database=catalogflow;Username=postgres;Password=${POSTGRES_PASSWORD};Maximum Pool Size=${CATALOG_DB_POOL_SIZE:-30}
       Jwt__Key: ${JWT_KEY}
       Jwt__Issuer: ${JWT_ISSUER}
       Jwt__Audience: ${JWT_AUDIENCE}
@@ -113,7 +113,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__InventoryDatabase: Host=postgres-inventory;Port=5432;Database=inventoryflow;Username=postgres;Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__InventoryDatabase: Host=postgres-inventory;Port=5432;Database=inventoryflow;Username=postgres;Password=${POSTGRES_PASSWORD};Maximum Pool Size=${INVENTORY_DB_POOL_SIZE:-30}
       RabbitMq__Host: rabbitmq
       RabbitMq__Username: ${RABBITMQ_USER}
       RabbitMq__Password: ${RABBITMQ_PASSWORD}
@@ -162,7 +162,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__OrderDatabase: Host=postgres-order;Port=5432;Database=orderflow;Username=postgres;Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__OrderDatabase: Host=postgres-order;Port=5432;Database=orderflow;Username=postgres;Password=${POSTGRES_PASSWORD};Maximum Pool Size=${ORDER_DB_POOL_SIZE:-80}
       RabbitMq__Host: rabbitmq
       RabbitMq__Username: ${RABBITMQ_USER}
       RabbitMq__Password: ${RABBITMQ_PASSWORD}
